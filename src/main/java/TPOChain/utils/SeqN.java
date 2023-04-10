@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.util.Objects;
 
 public class SeqN implements Comparable<SeqN> {
+    //counter是一个term信息
     private final int counter;
     private final Host node;
 

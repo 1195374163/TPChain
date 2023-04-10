@@ -31,6 +31,8 @@ public abstract class FrontendProto extends GenericProtocol {
     private final int opPrefix;
     private final short protoIndex;
     protected int peerChannel;
+
+    //系统中节点列表动态的更新
     protected List<InetAddress> membership;
     private int opCounter;
 

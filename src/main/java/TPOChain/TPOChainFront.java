@@ -50,6 +50,8 @@ public class TPOChainFront extends FrontendProto {
     //ToSubmit reads
     private List<byte[]> readDataBuffer;
 
+
+
     public TPOChainFront(Properties props, short protoIndex, Application app) throws IOException {
         super(PROTOCOL_NAME_BASE + protoIndex, (short) (PROTOCOL_ID_BASE + protoIndex),
                 props, protoIndex, app);
