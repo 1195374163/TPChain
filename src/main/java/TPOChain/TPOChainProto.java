@@ -56,14 +56,17 @@ public class TPOChainProto extends GenericProtocol {
     public static final String INITIAL_MEMBERSHIP_KEY = "initial_membership";
     public static final String RECONNECT_TIME_KEY = "reconnect_time";
     public static final String NOOP_INTERVAL_KEY = "noop_interval";
+
     //各项超时设置
     private final int LEADER_TIMEOUT;
+    private final int JOIN_TIMEOUT;
+    private final int STATE_TRANSFER_TIMEOUT;
     private final int NOOP_SEND_INTERVAL;
     private final int QUORUM_SIZE;
     private final int RECONNECT_TIME;
 
-    private final int STATE_TRANSFER_TIMEOUT;
-    private final int JOIN_TIMEOUT;
+
+
 
 
 
@@ -87,35 +90,54 @@ public class TPOChainProto extends GenericProtocol {
     private Host nextOk;
 
 
+    //节点的状态：在加入整个系统中的状态变迁
     enum State {JOINING, WAITING_STATE_TRANSFER, ACTIVE}
-
     private TPOChainProto.State state;
+
+
     private Membership membership;
 
     /**
      * 在各个节点暂存的信息和全局存储的信息
      */
-    private static final int INITIAL_MAP_SIZE = 1000;
+    private static final int INITIAL_MAP_SIZE = 3000;
+    //局部日志
     private final Map<Integer, InstanceState> instances = new HashMap<>(INITIAL_MAP_SIZE);
+    //全局日志
     private final Map<Host,Map<Integer, InstanceState>>  globalinstance=new HashMap<>(INITIAL_MAP_SIZE);
 
-    //标记是否为前段节点
-    private boolean  isQuorum;
-    //标记
+    //各副本的的一些数据状态：
+    //private  Map<Host,>
+
+
+    //标记是否为前段节点，代表者可以发送command，并向leader发送排序
+    private boolean  isFrontedChain;
+    //标记是否是错误
     private boolean  isFault;
 
+    //各个command leader进行命令的分发
     private int highestAcknowledgedInstance = -1;
     private int highestAcceptedInstance = -1;
     private int highestDecidedInstance = -1;
     private int lastAcceptSent = -1;
 
+    //leader的排序字段
+    private int highestAcknowledgedInstanceCL = -1;
+    private int highestAcceptedInstanceCL = -1;
+    private int highestDecidedInstanceCl = -1;
+    private int lastAcceptSentCL = -1;
 
 
 
     //Leadership
     private Map.Entry<Integer, SeqN> currentSN;
+    //是否为leader,职能排序
     private boolean amQuorumLeader;
+    //保持leader的心跳信息
     private long lastAcceptTime;
+    //关于leader的任期
+    private int  term=-1;
+
 
 
     //Timers
@@ -152,11 +174,10 @@ public class TPOChainProto extends GenericProtocol {
 
     private long leaderTimeoutTimer;
 
-
+    //关于节点的tcp通道信息
     private int peerChannel;
 
     private final EventLoopGroup workerGroup;
-
 
 
 

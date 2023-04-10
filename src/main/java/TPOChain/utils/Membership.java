@@ -11,8 +11,8 @@ public class Membership {
     private static final Logger logger = LogManager.getLogger(Membership.class);
 
     private final List<Host> members;
-
     private final Map<Host, Integer> indexMap;
+    private final  Map<Host,HostConfigure> memConfigure;
 
     /**
      * 待处理的要删除的节点
@@ -21,15 +21,32 @@ public class Membership {
 
     private final int MIN_QUORUM_SIZE;
 
+    //对系统中的节点进行初始分配
     public Membership(List<Host> initial, int MIN_QUORUM_SIZE) {
         this.MIN_QUORUM_SIZE = MIN_QUORUM_SIZE;
         members = new ArrayList<>(initial);
+
+        memConfigure=new HashMap<>();
+        initFrontedChain(initial,MIN_QUORUM_SIZE);
+
         indexMap = new HashMap<>();
         pendingRemoval = new HashSet<>();
         //logger.info("New " + this);
         checkSizeAgainstMaxFailures();
     }
 
+    //对链的节点进行配置，主要是对链的前链和后链的进行标记，有无故障
+    public  void  initFrontedChain(List<Host> initial,int MIN_QUORUM_SIZE){
+        int i=0;
+        for (Host temp : initial) {
+            if(i<MIN_QUORUM_SIZE){
+                memConfigure.put(temp,new HostConfigure(i,true,false));
+            }else{
+                memConfigure.put(temp,new HostConfigure(i,false,false));
+            }
+            i++;
+        }
+    }
     public List<Host> getMembers() {
         return Collections.unmodifiableList(members);
     }
@@ -76,19 +93,7 @@ public class Membership {
         return nextHost;
     }
 
-    /**
-     *返回它的向左的下一个存活节点
-     * */
-    public Host nextLivingInChainRight(Host myHost) {
-        assert contains(myHost);
-        int nextIndexRight = (indexOf(myHost) -1) % members.size();
-        Host nextHostRight = members.get(nextIndexRight);
-        while (pendingRemoval.contains(nextHostRight)) {
-            nextIndexRight = (nextIndexRight -1) % members.size();
-            nextHostRight = members.get(nextIndexRight);
-        }
-        return nextHostRight;
-    }
+
 
     /**
      * 返回两个主机的距离
