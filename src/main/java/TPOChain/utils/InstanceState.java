@@ -11,16 +11,18 @@ import java.util.*;
 public class InstanceState {
 
     public final int iN;
+    //要对SeqN进行改造，Seq的Node节点标记从哪个commandleader发来的
     public SeqN highestAccept;
     public PaxosValue acceptedValue;
     public short counter;
     private boolean decided;
-
+    //这个要去掉，
     public Map<SeqN, Set<Host>> prepareResponses;
 
-
-    //附加的读
+    //附加的读  这个要去掉
     private Map<Short, Queue<Long>> attachedReads;
+
+
 
     /**
      * c-instance和o-instance是否都发了的标记位，在新leader选举时，考虑到是否向leader发送request问题。

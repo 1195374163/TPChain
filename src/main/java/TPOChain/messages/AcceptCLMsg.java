@@ -9,24 +9,23 @@ import pt.unl.fct.di.novasys.network.data.Host;
 
 import java.io.IOException;
 
-public class AcceptMsg extends ProtoMessage {
+public class AcceptCLMsg extends ProtoMessage {
 
-    public static final short MSG_CODE = 202;
+    public static final short MSG_CODE = 302;
 
-    public final  Host node;
     public final int iN;
+    public final Host node;
 
     public final SeqN sN;
-    public final PaxosValue value;
+
     public final short nodeCounter;
     public final int ack;
 
-    public AcceptMsg(Host node,int iN,SeqN sN, short nodeCounter, PaxosValue value, int ack) {
+    public AcceptCLMsg(int iN,Host node,SeqN sN, short nodeCounter, int ack) {
         super(MSG_CODE);
-        this.node=node;
         this.iN = iN;
+        this.node=node;
         this.sN = sN;
-        this.value = value;
         this.nodeCounter = nodeCounter;
         this.ack = ack;
     }
@@ -34,33 +33,37 @@ public class AcceptMsg extends ProtoMessage {
     @Override
     public String toString() {
         return "AcceptMsg{" +
-                "node=" + node +
                 "iN=" + iN +
+                "node=" + node +
                 ", sN=" + sN +
-                ", value=" + value +
                 ", nodeCounter=" + nodeCounter +
                 ", ack=" + ack +
                 '}';
     }
 
-    public static ISerializer<? extends ProtoMessage> serializer = new ISerializer<AcceptMsg>() {
-        public void serialize(AcceptMsg msg, ByteBuf out) throws IOException {
-            Host.serializer.serialize(msg.node,out);
+    public static ISerializer<? extends ProtoMessage> serializer = new ISerializer<AcceptCLMsg>() {
+        public void serialize(AcceptCLMsg msg, ByteBuf out) throws IOException {
             out.writeInt(msg.iN);
+            Host.serializer.serialize(msg.node,out);
             msg.sN.serialize(out);
             out.writeShort(msg.nodeCounter);
-            PaxosValue.serializer.serialize(msg.value, out);
             out.writeInt(msg.ack);
         }
 
-        public AcceptMsg deserialize(ByteBuf in) throws IOException {
-            Host t=Host.serializer.deserialize(in);
+        /**
+         * public final Host node;
+         * this.node=node;
+         *  "node=" + node +
+         * Host.serializer.serialize(msg.node,out);
+         * Host t=Host.serializer.deserialize(in);
+         * */
+        public AcceptCLMsg deserialize(ByteBuf in) throws IOException {
             int instanceNumber = in.readInt();
+            Host t=Host.serializer.deserialize(in);
             SeqN sN = SeqN.deserialize(in);
             short nodeCount = in.readShort();
-            PaxosValue payload = PaxosValue.serializer.deserialize(in);
             int ack = in.readInt();
-            return new AcceptMsg(t,instanceNumber,sN, nodeCount, payload, ack);
+            return new AcceptCLMsg(instanceNumber, t,sN, nodeCount,ack);
         }
     };
 }

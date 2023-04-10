@@ -26,7 +26,6 @@ public class OpBatch {
     }
 
 
-
     public List<byte[]> getOps() {
         return ops;
     }

@@ -12,14 +12,16 @@ public class Membership {
 
     private final List<Host> members;
     private final Map<Host, Integer> indexMap;
-    private final  Map<Host,HostConfigure> memConfigure;
-
     /**
      * 待处理的要删除的节点
      * */
     private final Set<Host> pendingRemoval;
 
+    //打算将indexMap 和 标记故障节点记录在HostConfigure对象中
+    private final  Map<Host,HostConfigure> memConfigure;
+
     private final int MIN_QUORUM_SIZE;
+
 
     //对系统中的节点进行初始分配
     public Membership(List<Host> initial, int MIN_QUORUM_SIZE) {
@@ -35,6 +37,8 @@ public class Membership {
         checkSizeAgainstMaxFailures();
     }
 
+
+
     //对链的节点进行配置，主要是对链的前链和后链的进行标记，有无故障
     public  void  initFrontedChain(List<Host> initial,int MIN_QUORUM_SIZE){
         int i=0;
@@ -47,6 +51,8 @@ public class Membership {
             i++;
         }
     }
+
+
     public List<Host> getMembers() {
         return Collections.unmodifiableList(members);
     }
@@ -64,6 +70,7 @@ public class Membership {
         }
     }
 
+
     /**
      * 判断是否是最后的节点
      * */
@@ -79,6 +86,7 @@ public class Membership {
         return distOther >= distLeader;
     }
 
+
     /**
      * 返回当前节点向右的下一个存活节点s
      * */
@@ -92,7 +100,6 @@ public class Membership {
         }
         return nextHost;
     }
-
 
 
     /**
@@ -112,13 +119,16 @@ public class Membership {
         return indexMap.computeIfAbsent(host, members::indexOf);
     }
 
+
     public boolean contains(Host host) {
         return indexOf(host) >= 0;
     }
 
+
     public Host nodeAt(int pos){
         return members.get(pos);
     }
+
 
     public void addMember(Host host, int position) {
         if (contains(host)) {
@@ -136,6 +146,7 @@ public class Membership {
         checkSizeAgainstMaxFailures();
     }
 
+
     public void removeMember(Host host) {
         if (!contains(host)) {
             logger.error("Removing non-existing host: " + host);
@@ -150,9 +161,11 @@ public class Membership {
         checkSizeAgainstMaxFailures();
     }
 
+
     public int size() {
         return members.size();
     }
+
 
     /**
      * 返回的从当前节点(不包括当前节点)到目标节点(包括目标节点)的所有节点的Iterator
@@ -174,6 +187,7 @@ public class Membership {
         return res.iterator();
     }
 
+    //进行浅拷贝
     public List<Host> shallowCopy() {
         return new ArrayList<>(members);
     }
@@ -187,6 +201,7 @@ public class Membership {
         boolean remove = pendingRemoval.remove(affectedHost);
         assert remove;
     }
+
 
     @Override
     public String toString() {

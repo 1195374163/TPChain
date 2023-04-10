@@ -1,23 +1,26 @@
 package TPOChain.utils;
 
 import TPOChain.ipc.SubmitReadRequest;
-import common.values.PaxosValue;
 import pt.unl.fct.di.novasys.network.data.Host;
 
 import java.util.*;
 
-public class CLInstanceState {
+public class InstanceStateCL {
 
     public final int iN;
-    public  Host node;
     public SeqN highestAccept;
-    //这个字段不需要
-    public PaxosValue acceptedValue;
+    //public PaxosValue acceptedValue;
+    //上面这个不需要，反而是需要<node，sequence>标识一个acceptedValue
+    public Host node;//哪个commandleader发出的
+    public int  sequence;//在commandleader的第几个位置
+
+    //ack的数量
     public short counter;
     private boolean decided;
     public Map<SeqN, Set<Host>> prepareResponses;
     //附加的读
     private Map<Short, Queue<Long>> attachedReads;
+
 
     /**
      * c-instance和o-instance是否都发了的标记位，在新leader选举时，考虑到是否向leader发送request问题。
@@ -25,22 +28,24 @@ public class CLInstanceState {
 
     //private  boolean   coconcurrency;
     //重写
-    public CLInstanceState(int iN) {
+    public InstanceStateCL(int iN) {
         this.iN = iN;
         this.highestAccept = null;
-        this.acceptedValue = null;
         this.counter = 0;
         this.decided = false;
         this.prepareResponses = new HashMap<>();
         this.attachedReads = new HashMap<>();
+        this.node=null;//哪个commandleader发出的
+        this.sequence=0;//在commandleader的第几个位置
     }
-    //需要重写
+
     @Override
     public String toString() {
         return "InstanceState{" +
                 "iN=" + iN +
                 ", highestAccept=" + highestAccept +
-                ", acceptedValue=" + acceptedValue +
+                ", Host=" + node +
+                ", sequence=" + sequence +
                 ", counter=" + counter +
                 ", decided=" + decided +
                 ", prepareResponses=" + prepareResponses +
@@ -56,31 +61,27 @@ public class CLInstanceState {
         return attachedReads;
     }
 
+
     //If it is already decided by some node, or received from prepareOk
     /**
      * 更新SeqN和counter信息，准备重新发送
      * */
-    public void forceAccept(SeqN sN, PaxosValue value) {
-        assert sN.getCounter() > -1;
-        assert value != null;
-        assert highestAccept == null || sN.greaterOrEqualsThan(highestAccept);
-        assert !isDecided() || acceptedValue.equals(value);
-        assert highestAccept == null || sN.greaterThan(highestAccept) || acceptedValue.equals(value);
-
+    public void forceAccept(SeqN sN, Host node,int sequence) {
+//        assert sN.getCounter() > -1;
+//        assert value != null;
+//        assert highestAccept == null || sN.greaterOrEqualsThan(highestAccept);
+//        assert !isDecided() || acceptedValue.equals(value);
+//        assert highestAccept == null || sN.greaterThan(highestAccept) || acceptedValue.equals(value);
         this.highestAccept = sN.greaterThan(this.highestAccept) ? sN : this.highestAccept;
-        this.acceptedValue = value;
+        this.node=node;//哪个commandleader发出的
+        this.sequence=sequence;//在commandleader的第几个位置
         this.counter = -1;
     }
 
-    public void accept(SeqN sN, PaxosValue value, short counter) {
-        assert sN.getCounter() > -1;
-        assert value != null;
-        assert highestAccept == null || sN.greaterOrEqualsThan(highestAccept);
-        assert !isDecided() || acceptedValue.equals(value);
-        assert highestAccept == null || sN.greaterThan(highestAccept) || acceptedValue.equals(value);
-
+    public void accept(SeqN sN,Host node,int sequence, short counter) {
         this.highestAccept = sN;
-        this.acceptedValue = value;
+        this.node=node;//哪个commandleader发出的
+        this.sequence=sequence;//在commandleader的第几个位置
         this.counter = counter;
     }
 
@@ -89,8 +90,8 @@ public class CLInstanceState {
     }
 
     public void markDecided() {
-        assert acceptedValue != null && highestAccept != null;
-        assert !decided;
+//        assert acceptedValue != null && highestAccept != null;
+//        assert !decided;
         decided = true;
     }
 }
