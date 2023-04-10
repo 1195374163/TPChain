@@ -63,14 +63,6 @@ public class TPOChainProto extends GenericProtocol {
 
 
 
-
-
-    /**
-     * 已经建立连接的主机
-     * */
-    private final Set<Host> establishedConnections = new HashSet<>();
-
-
     /**
      * 在竞选leader时即候选者时暂存的命令
      * */
@@ -100,6 +92,10 @@ public class TPOChainProto extends GenericProtocol {
      * */
     private Membership membership;
 
+    /**
+     * 已经建立连接的主机
+     * */
+    private final Set<Host> establishedConnections = new HashSet<>();
 
 
 
@@ -112,8 +108,7 @@ public class TPOChainProto extends GenericProtocol {
      * 局部日志
      */
     private final Map<Integer, InstanceState> instances = new HashMap<>(INITIAL_MAP_SIZE);
-//  private final Map<Integer,Map<Integer, InstanceState>> instances = new HashMap<>(INITIAL_MAP_SIZE);
-
+//    private final Map<Integer,Map<Integer, InstanceState>> instances = new HashMap<>(INITIAL_MAP_SIZE);
 
     /**
      * 全局日志
@@ -129,6 +124,7 @@ public class TPOChainProto extends GenericProtocol {
      * 标记是否为前段节点，代表者可以发送command，并向leader发送排序
      * */
     private boolean  isFrontedChain;
+
 
     //标志着leader当前是谁，<Integer>是当选为leader的instance的实例号,SeqN是二元组，标志着term和Host
     private Map.Entry<Integer, SeqN> currentSN;
@@ -266,8 +262,11 @@ public class TPOChainProto extends GenericProtocol {
         setDefaultChannel(peerChannel);
 
         registerMessageSerializer(peerChannel, AcceptAckMsg.MSG_CODE, AcceptAckMsg.serializer);
+        registerMessageSerializer(peerChannel, AcceptAckCLMsg.MSG_CODE, AcceptAckCLMsg.serializer);
         registerMessageSerializer(peerChannel, AcceptMsg.MSG_CODE, AcceptMsg.serializer);
+        registerMessageSerializer(peerChannel, AcceptCLMsg.MSG_CODE, AcceptCLMsg.serializer);
         registerMessageSerializer(peerChannel, DecidedMsg.MSG_CODE, DecidedMsg.serializer);
+        registerMessageSerializer(peerChannel, DecidedCLMsg.MSG_CODE, DecidedCLMsg.serializer);
         registerMessageSerializer(peerChannel, JoinRequestMsg.MSG_CODE, JoinRequestMsg.serializer);
         registerMessageSerializer(peerChannel, JoinSuccessMsg.MSG_CODE, JoinSuccessMsg.serializer);
         registerMessageSerializer(peerChannel, MembershipOpRequestMsg.MSG_CODE, MembershipOpRequestMsg.serializer);
@@ -279,8 +278,11 @@ public class TPOChainProto extends GenericProtocol {
 
         registerMessageHandler(peerChannel, UnaffiliatedMsg.MSG_CODE, this::uponUnaffiliatedMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, AcceptAckMsg.MSG_CODE, this::uponAcceptAckMsg, this::uponMessageFailed);
+        registerMessageHandler(peerChannel, AcceptAckCLMsg.MSG_CODE, this::uponAcceptAckCLMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, AcceptMsg.MSG_CODE, this::uponAcceptMsg, this::uponMessageFailed);
+        registerMessageHandler(peerChannel, AcceptCLMsg.MSG_CODE, this::uponAcceptCLMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, DecidedMsg.MSG_CODE, this::uponDecidedMsg, this::uponMessageFailed);
+        registerMessageHandler(peerChannel, DecidedCLMsg.MSG_CODE, this::uponDecidedCLMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, JoinRequestMsg.MSG_CODE,
                 this::uponJoinRequestMsg, this::uponJoinRequestOut, this::uponMessageFailed);
         registerMessageHandler(peerChannel, JoinSuccessMsg.MSG_CODE,
@@ -325,7 +327,14 @@ public class TPOChainProto extends GenericProtocol {
         logger.info("TPOChainProto: " + membership + " qs " + QUORUM_SIZE);
     }
 
+    private void uponDecidedCLMsg(DecidedCLMsg protoMessage, Host from, short sourceProto, int channel) {
+    }
 
+    private void uponAcceptCLMsg(AcceptCLMsg protoMessage, Host from, short sourceProto, int channel) {
+    }
+
+    private void uponAcceptAckCLMsg(AcceptAckCLMsg protoMessage, Host from, short sourceProto, int channel) {
+    }
 
 
     //接下来几个方法涉及leader选举
@@ -829,6 +838,8 @@ public class TPOChainProto extends GenericProtocol {
 
         ackInstance(msg.ack);//对于之前的实例进行ack并进行垃圾收集
     }
+
+
 
 
 
