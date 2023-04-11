@@ -160,10 +160,15 @@ public class TPOChainProto extends GenericProtocol {
     /**
      * 这是主要排序阶段使用
      * */
-    private int highestAcceptedInstanceCL = -1;
-    private int highestAcknowledgedInstanceCL = -1;
-    private int highestDecidedInstanceCl = -1;
-    private int lastAcceptSentCL = -1;
+    /**
+     * FrtontedChain使用这个字段
+     * */
+    private int lastAcceptCLSent = -1;
+    private int highestAcceptedCLInstance = -1;
+    private int highestDecidedCLInstanceCl = -1;
+    private int highestAcknowledgedCLInstance = -1;
+
+
 
 
     /**
@@ -655,8 +660,7 @@ public class TPOChainProto extends GenericProtocol {
         }
 
     }
-
-
+    
     /**
      * 处理leader和其他节点呼吸事件
      * */
@@ -670,7 +674,52 @@ public class TPOChainProto extends GenericProtocol {
             cancelTimer(noOpTimer);
         }
     }
+
     
+    
+    
+    /**
+     * 成为前链节点，这里不应该有cl后缀
+     * */
+    private  void   becomeFrontedChain(){
+        isFrontedChain = true;
+        flushMsgTimer = setupPeriodicTimer(FlushMsgTimer.instance, NOOP_SEND_INTERVAL, Math.max(NOOP_SEND_INTERVAL / 3,1));
+        logger.info("I am FrontedChain now! ");
+        
+        //标记leader发送到下一个节点到哪了
+        lastAcceptSentCL = highestAcceptedInstance;
+
+        /**
+         * 对集群中不能连接的节点进行删除
+         * */
+        membership.getMembers().forEach(h -> {
+            if (!h.equals(self) && !establishedConnections.contains(h)) {
+                logger.info("Will propose remove " + h);
+                uponMembershipOpRequestMsg(new MembershipOpRequestMsg(MembershipOp.RemoveOp(h)),
+                        self, getProtoId(), peerChannel);
+            }
+        });
+
+        lastAcceptTime = 0;
+
+        
+    }
+    private  long lastAcceptTime=-1;
+    private long flushMsgTimer = -1; 
+    
+    /**
+     * 对最后的此节点的消息进行发送ack信息  FlushMsgTimer
+     * */
+    private void onFlushMsgTimer(FlushMsgTimer timer, long timerId) {
+        if (isFrontedChain) {
+            assert waitingAppOps.isEmpty() && waitingMembershipOps.isEmpty();
+            if (System.currentTimeMillis() - lastAcceptCLTime > NOOP_SEND_INTERVAL)
+                sendNextAcceptCL(new NoOpValue());
+        } else {
+            logger.warn(timer + " while not FrontedChain");
+            cancelTimer(flushMsgTimer);
+        }
+    }
     
     
 
@@ -690,10 +739,11 @@ public class TPOChainProto extends GenericProtocol {
         }
     }
     
-    /***
-     * 
+    /**
+     * 生成排序消息发给
      * **/
-    private void sendNextAcceptCL() {
+    private void sendNextAcceptCL(PaxosValue val) {
+        assert supportedLeader().equals(self) && amQuorumLeader;
 
         InstanceState instance = instances.computeIfAbsent(lastAcceptSent + 1, InstanceState::new);
         assert instance.acceptedValue == null && instance.highestAccept == null;
@@ -718,6 +768,8 @@ public class TPOChainProto extends GenericProtocol {
         } else
             nextValue = new NoOpValue();
 
+        this.uponAcceptCLMsg(new AcceptMsg(instance.iN, currentSN.getValue(),
+                (short) 0, nextValue, highestAcknowledgedInstance), self, this.getProtoId(), peerChannel);
         //参数列表AcceptMsg(int iN, SeqN sN, short nodeCounter, PaxosValue value, int ack)
         // 参数列表uponAcceptMsg(AcceptMsg msg, Host from, short sourceProto, int channel)
         lastAcceptSent = instance.iN;
@@ -883,6 +935,15 @@ public class TPOChainProto extends GenericProtocol {
     
     
     /**-----------------------------处理节点的分发信息-------------------------------**/
+
+    /**
+     * 向leader发送排序请求
+     * **/
+    private void  sendOrderMSg(){
+
+
+    }
+    
     
     //接下一个方法涉及消息的正常处理accpt
     /**
@@ -922,14 +983,6 @@ public class TPOChainProto extends GenericProtocol {
         lastAcceptTime = System.currentTimeMillis();
     }
     
-    
-    /**
-     * 向leader发送排序请求
-     * **/
-    private void  sendOrderMSg(){
-        
-        
-    }
     
     
     /**
