@@ -71,6 +71,7 @@ public class TPOChainProto extends GenericProtocol {
     private final Queue<AppOpBatch> waitingAppOps = new LinkedList<>();
     private final Queue<MembershipOp> waitingMembershipOps = new LinkedList<>();
 
+    
 
     /**
      * 节点的状态：在加入整个系统中的状态变迁
@@ -87,9 +88,7 @@ public class TPOChainProto extends GenericProtocol {
      * 消息的下一个节点
      * */
     private Host nextOk;
-
-
-
+    
     /**
      * 包含状态的成员列表，随时可以更新
      * */
@@ -125,6 +124,20 @@ public class TPOChainProto extends GenericProtocol {
      * 保持leader的心跳信息，用系统当前时间减去上次时间
      * */
     private long lastAcceptTime;
+
+
+    
+    
+    /**
+     *计时 与leader之间的呼吸
+     * */
+    //多长时间没接收到leader消息
+    private long leaderTimeoutTimer;
+    //在每个节点标记上次leader命令的时间
+    private long lastLeaderOp;
+
+
+
 
 
     /**
@@ -176,27 +189,9 @@ public class TPOChainProto extends GenericProtocol {
      * */
     private  Map<Host,RuntimeConfigure>  hostConfigureMap=new HashMap<>();
 
-
-
-
-
-
-
-
-
-
-
-    //Timers
-
-
-
-
-    //多长时间没接收到leader消息
-    private long leaderTimeoutTimer;
-    //在每个节点标记上次leader命令的时间
-    private long lastLeaderOp;
-
-
+    
+    
+    
 
 
     /**
@@ -373,16 +368,7 @@ public class TPOChainProto extends GenericProtocol {
         logger.info("TPOChainProto: " + membership + " qs " + QUORUM_SIZE);
     }
 
-    private void uponDecidedCLMsg(DecidedCLMsg protoMessage, Host from, short sourceProto, int channel) {
-    }
-
-    private void uponAcceptCLMsg(AcceptCLMsg protoMessage, Host from, short sourceProto, int channel) {
-    }
-
-    private void uponAcceptAckCLMsg(AcceptAckCLMsg protoMessage, Host from, short sourceProto, int channel) {
-    }
-
-
+    
     //接下来几个方法涉及leader选举
     /**
      * 初始状态开始启动
@@ -519,7 +505,8 @@ public class TPOChainProto extends GenericProtocol {
                 membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
                 null, supportedLeader().getAddress(), null));
     }
-
+    
+    //TODO  废弃掉这个，重写接收到decided消息
     /**
      * 收到Decided信息
      */
@@ -553,6 +540,11 @@ public class TPOChainProto extends GenericProtocol {
             tryTakeLeadership();
     }
 
+    //TODO 对排序信息进行处理
+    private void uponDecidedCLMsg(DecidedCLMsg protoMessage, Host from, short sourceProto, int channel) {
+    }
+    
+    
     /**
      *接收PrepareOkMsg消息
      * */
@@ -665,6 +657,233 @@ public class TPOChainProto extends GenericProtocol {
     }
 
 
+    /**
+     * 处理leader和其他节点呼吸事件
+     * */
+    private void onNoOpTimer(NoOpTimer timer, long timerId) {
+        if (amQuorumLeader) {
+            assert waitingAppOps.isEmpty() && waitingMembershipOps.isEmpty();
+            if (System.currentTimeMillis() - lastAcceptTime > NOOP_SEND_INTERVAL)
+                sendNextAccept(new NoOpValue());
+        } else {
+            logger.warn(timer + " while not quorumLeader");
+            cancelTimer(noOpTimer);
+        }
+    }
+    
+    
+    
+
+
+
+    
+/**------leader的重新发送排序命令，也可以包括成员添加，删除操作--**/
+
+    /**
+     * leader负责接收其他前链节点发过来的请求排序消息
+     * */
+    private  void  uponOrderMSg(){
+        if (amQuorumLeader){//只有leader才能处理这个排序请求
+            
+        }else {
+            return;
+        }
+    }
+    
+    /***
+     * 
+     * **/
+    private void sendNextAcceptCL() {
+
+        InstanceState instance = instances.computeIfAbsent(lastAcceptSent + 1, InstanceState::new);
+        assert instance.acceptedValue == null && instance.highestAccept == null;
+
+        PaxosValue nextValue;
+        if (val.type == PaxosValue.Type.MEMBERSHIP) {
+            MembershipOp next = (MembershipOp) val;
+            if ((next.opType == MembershipOp.OpType.REMOVE && !membership.contains(next.affectedHost)) ||
+                    (next.opType == MembershipOp.OpType.ADD && membership.contains(next.affectedHost))) {
+                logger.warn("Duplicate or invalid mOp: " + next);
+                nextValue = new NoOpValue();
+            } else {//若是正常的添加，删除
+                if (next.opType == MembershipOp.OpType.ADD) //TODO remove this hack
+                    next = MembershipOp.AddOp(next.affectedHost, membership.indexOf(self));
+                nextValue = next;
+            }
+
+        } else if (val.type == PaxosValue.Type.APP_BATCH) {
+            nextValue = val;
+            //nBatches++;
+            //nOpsBatched += ops.size();
+        } else
+            nextValue = new NoOpValue();
+
+        //参数列表AcceptMsg(int iN, SeqN sN, short nodeCounter, PaxosValue value, int ack)
+        // 参数列表uponAcceptMsg(AcceptMsg msg, Host from, short sourceProto, int channel)
+        lastAcceptSent = instance.iN;
+        lastAcceptTime = System.currentTimeMillis();
+    }
+    
+    private void uponAcceptCLMsg(AcceptCLMsg protoMessage, Host from, short sourceProto, int channel) {
+    }
+    /**
+     * 转发accept信息给下一个节点
+     * */
+  
+    /**
+     *标记要删除的节点
+     * */
+    private void markForRemoval(InstanceState inst) {
+        MembershipOp op = (MembershipOp) inst.acceptedValue;
+        membership.addToPendingRemoval(op.affectedHost);
+        if (nextOk.equals(op.affectedHost)) {
+            nextOk = membership.nextLivingInChain(self);
+            //对ack序号信息进行到accpt序号信息进行重新转发
+            for (int i = highestAcknowledgedInstance + 1; i < inst.iN; i++) {
+                forward(instances.get(i));
+            }
+        }
+    }
+
+    private void forwardCL(InstanceState inst) {
+        //TODO some cases no longer happen (like leader being removed)
+        if (!membership.contains(inst.highestAccept.getNode())) {
+            logger.error("Received accept from removed node (?)");
+            throw new AssertionError("Received accept from removed node (?)");
+        }
+
+        Iterator<Host> targets = membership.nextNodesUntil(self, nextOk);
+        while (targets.hasNext()) {
+            Host target = targets.next();
+            if (target.equals(self)) {
+                logger.error("Sending accept to myself: " + membership);
+                throw new AssertionError("Sending accept to myself: " + membership);
+            }
+
+            if (membership.isAfterLeader(self, inst.highestAccept.getNode(), target)) { //am last
+                assert target.equals(inst.highestAccept.getNode());
+                //If last in chain than we must have decided (unless F+1 dead/inRemoval)
+                if (inst.counter < QUORUM_SIZE) {
+                    logger.error("Last living in chain cannot decide. Are f+1 nodes dead/inRemoval? "
+                            + inst.counter);
+                    throw new AssertionError("Last living in chain cannot decide. " +
+                            "Are f+1 nodes dead/inRemoval? " + inst.counter);
+                }
+                sendMessage(new AcceptAckMsg(inst.iN), target);
+            } else { //not last in chain...
+                AcceptMsg msg = new AcceptMsg(inst.iN, inst.highestAccept, inst.counter, inst.acceptedValue,
+                        highestAcknowledgedInstance);
+                sendMessage(msg, target);
+            }
+        }
+    }
+    
+    /**
+     * decide并执行Execute实例
+     * */
+    private void decideAndExecuteCL(InstanceState instance) {
+        assert highestDecidedInstance == instance.iN - 1;
+        assert !instance.isDecided();
+
+        instance.markDecided();
+        highestDecidedInstance++;
+        //Actually execute message
+        logger.debug("Decided: " + instance.iN + " - " + instance.acceptedValue);
+        if (instance.acceptedValue.type == PaxosValue.Type.APP_BATCH) {
+            if (state == TPOChainProto.State.ACTIVE)
+                triggerNotification(new ExecuteBatchNotification(((AppOpBatch) instance.acceptedValue).getBatch()));
+            else
+                bufferedOps.add((AppOpBatch) instance.acceptedValue);
+        } else if (instance.acceptedValue.type == PaxosValue.Type.MEMBERSHIP) {
+            executeMembershipOp(instance);
+        } else if (instance.acceptedValue.type != PaxosValue.Type.NO_OP) {
+            logger.error("Trying to execute unknown paxos value: " + instance.acceptedValue);
+            throw new AssertionError("Trying to execute unknown paxos value: " + instance.acceptedValue);
+        }
+
+    }
+    /**
+     * 对于ack包括以前的消息执行
+     * */
+    private void ackInstanceCL(int instanceN) {
+        //For nodes in the first half of the chain only
+        for (int i = highestDecidedInstance + 1; i <= instanceN; i++) {
+            InstanceState ins = instances.get(i);
+            assert !ins.isDecided();
+            decideAndExecute(ins);
+            assert highestDecidedInstance == i;
+        }
+
+        //For everyone
+        for (int i = highestAcknowledgedInstance + 1; i <= instanceN; i++) {
+            InstanceState ins = instances.remove(i);
+            ins.getAttachedReads().forEach((k, v) -> sendReply(new ExecuteReadReply(v, ins.iN), k));
+
+            assert ins.isDecided();
+            //更新ack信息
+            highestAcknowledgedInstance++;
+            assert highestAcknowledgedInstance == i;
+        }
+    }
+
+    /**
+     * leader接收ack信息，对实例进行ack
+     * */
+    private void uponAcceptAckCLMsg(AcceptAckMsg msg, Host from, short sourceProto, int channel) {
+        //logger.debug(msg + " - " + from);
+        if (msg.instanceNumber <= highestAcknowledgedInstance) {
+            logger.warn("Ignoring acceptAck for old instance: " + msg);
+            return;
+        }
+
+        //TODO never happens?
+        InstanceState inst = instances.get(msg.instanceNumber);
+        if (!amQuorumLeader || !inst.highestAccept.getNode().equals(self)) {
+            logger.error("Received Ack without being leader...");
+            throw new AssertionError("Received Ack without being leader...");
+        }
+
+        if (inst.acceptedValue.type != PaxosValue.Type.NO_OP)
+            lastAcceptTime = 0; //Force sending a NO-OP (with the ack)
+
+        ackInstance(msg.instanceNumber);
+    }
+    
+    /**
+     * 执行成员Removed OR  addMember操作
+     * */
+    private void executeMembershipOp(InstanceState instance) {
+        MembershipOp o = (MembershipOp) instance.acceptedValue;
+        Host target = o.affectedHost;
+        if (o.opType == MembershipOp.OpType.REMOVE) {
+            logger.info("Removed from membership: " + target + " in inst " + instance.iN);
+            membership.removeMember(target);
+            triggerMembershipChangeNotification();
+            closeConnection(target);
+        } else if (o.opType == MembershipOp.OpType.ADD) {
+            logger.info("Added to membership: " + target + " in inst " + instance.iN);
+            membership.addMember(target, o.position);
+            triggerMembershipChangeNotification();
+            nextOk = membership.nextLivingInChain(self);
+            openConnection(target);
+
+            if (state == TPOChainProto.State.ACTIVE) {
+                sendMessage(new JoinSuccessMsg(instance.iN, instance.highestAccept, membership.shallowCopy()), target);
+                assert highestDecidedInstance == instance.iN;
+                //TODO need mechanism for joining node to inform nodes they can forget stored state
+                pendingSnapshots.put(target, MutablePair.of(instance.iN, instance.counter == QUORUM_SIZE));
+                sendRequest(new GetSnapshotRequest(target, instance.iN), TPOChainFront.PROTOCOL_ID_BASE);
+            }
+        }
+    }
+
+
+    
+    
+    
+    
+    /**-----------------------------处理节点的分发信息-------------------------------**/
+    
     //接下一个方法涉及消息的正常处理accpt
     /**
      *在当前节点是leader时处理，发送 或成员管理 或Noop 或App_Batch信息
@@ -702,61 +921,16 @@ public class TPOChainProto extends GenericProtocol {
         lastAcceptSent = instance.iN;
         lastAcceptTime = System.currentTimeMillis();
     }
-
-
-
-    //发送排序消息到下一个节点
-    private void sendNextAcceptCL() {
-
-        InstanceState instance = instances.computeIfAbsent(lastAcceptSent + 1, InstanceState::new);
-        assert instance.acceptedValue == null && instance.highestAccept == null;
-
-        PaxosValue nextValue;
-        if (val.type == PaxosValue.Type.MEMBERSHIP) {
-            MembershipOp next = (MembershipOp) val;
-            if ((next.opType == MembershipOp.OpType.REMOVE && !membership.contains(next.affectedHost)) ||
-                    (next.opType == MembershipOp.OpType.ADD && membership.contains(next.affectedHost))) {
-                logger.warn("Duplicate or invalid mOp: " + next);
-                nextValue = new NoOpValue();
-            } else {//若是正常的添加，删除
-                if (next.opType == MembershipOp.OpType.ADD) //TODO remove this hack
-                    next = MembershipOp.AddOp(next.affectedHost, membership.indexOf(self));
-                nextValue = next;
-            }
-
-        } else if (val.type == PaxosValue.Type.APP_BATCH) {
-            nextValue = val;
-            //nBatches++;
-            //nOpsBatched += ops.size();
-        } else
-            nextValue = new NoOpValue();
-
-        //参数列表AcceptMsg(int iN, SeqN sN, short nodeCounter, PaxosValue value, int ack)
-        // 参数列表uponAcceptMsg(AcceptMsg msg, Host from, short sourceProto, int channel)
-        lastAcceptSent = instance.iN;
-        lastAcceptTime = System.currentTimeMillis();
-    }
-
-
-
-
+    
+    
     /**
-     * 处理leader和其他节点呼吸事件
-     * */
-    private void onNoOpTimer(NoOpTimer timer, long timerId) {
-        if (amQuorumLeader) {
-            assert waitingAppOps.isEmpty() && waitingMembershipOps.isEmpty();
-            if (System.currentTimeMillis() - lastAcceptTime > NOOP_SEND_INTERVAL)
-                sendNextAccept(new NoOpValue());
-        } else {
-            logger.warn(timer + " while not quorumLeader");
-            cancelTimer(noOpTimer);
-        }
+     * 向leader发送排序请求
+     * **/
+    private void  sendOrderMSg(){
+        
+        
     }
-
-
-
-
+    
     /**
      * 处理accept信息
      */
@@ -820,88 +994,6 @@ public class TPOChainProto extends GenericProtocol {
         ackInstance(msg.ack);//对于之前的实例进行ack并进行垃圾收集
     }
 
-    /**
-     * 处理acceptCl信息
-     */
-    private void uponAcceptMsgCL(AcceptMsg msg, Host from, short sourceProto, int channel) {
-        //对不在系统中的节点发送未定义消息让其重新加入系统
-        if(!membership.contains(from)){
-            logger.warn("Received msg from unaffiliated host " + from);
-            sendMessage(new UnaffiliatedMsg(), from, TCPChannel.CONNECTION_IN);
-            return;
-        }
-
-        InstanceState instance = instances.computeIfAbsent(msg.iN, InstanceState::new);
-
-        /* 参数列表
-        * this.uponAcceptMsg(new AcceptMsg(instance.iN, currentSN.getValue(),
-                (short) 0, nextValue, highestAcknowledgedInstance), self, this.getProtoId(), peerChannel);
-        *
-        * */
-        //"Discarding decided msg" 当instance
-        if (instance.isDecided() && msg.sN.equals(instance.highestAccept)) {
-            logger.warn("Discarding decided msg");
-            return;
-        }
-
-        if (msg.sN.lesserThan(currentSN.getValue())) {
-            //logger.warn("Discarding accept since sN < hP: " + msg);
-            return;
-        }//之后新消息msg.SN大于等于现在的SN
-
-        //设置msg.sN.getNode()为新支持的leader
-        if (msg.sN.greaterThan(currentSN.getValue()))
-            setNewInstanceLeader(msg.iN, msg.sN);
-        //
-        if (msg.sN.equals(instance.highestAccept) && (msg.nodeCounter <= instance.counter)) {
-            logger.warn("Discarding since same sN & leader, while counter <=");
-            return;
-        }
-
-        lastLeaderOp = System.currentTimeMillis();//进行更新领导操作时间
-
-        assert msg.sN.equals(currentSN.getValue());
-
-        maybeCancelPendingRemoval(instance.acceptedValue);
-        instance.accept(msg.sN, msg.value, (short) (msg.nodeCounter + 1));//进行对实例的确定
-
-        //更新highestAcceptedInstance信息
-        if (highestAcceptedInstance < instance.iN) {
-            highestAcceptedInstance++;
-            assert highestAcceptedInstance == instance.iN;
-        }
-
-        if ((instance.acceptedValue.type == PaxosValue.Type.MEMBERSHIP) &&
-                (((MembershipOp) instance.acceptedValue).opType == MembershipOp.OpType.REMOVE))
-            markForRemoval(instance);//删除节点
-
-        forward(instance);//转发下一个节点
-
-        if (!instance.isDecided() && instance.counter >= QUORUM_SIZE) //We have quorum!
-            decideAndExecute(instance);//决定并执行实例
-
-        ackInstance(msg.ack);//对于之前的实例进行ack并进行垃圾收集
-    }
-
-
-
-
-
-
-    /**
-     *标记要删除的节点
-     * */
-    private void markForRemoval(InstanceState inst) {
-        MembershipOp op = (MembershipOp) inst.acceptedValue;
-        membership.addToPendingRemoval(op.affectedHost);
-        if (nextOk.equals(op.affectedHost)) {
-            nextOk = membership.nextLivingInChain(self);
-            //对ack序号信息进行到accpt序号信息进行重新转发
-            for (int i = highestAcknowledgedInstance + 1; i < inst.iN; i++) {
-                forward(instances.get(i));
-            }
-        }
-    }
 
     /**
      * 转发accept信息给下一个节点
@@ -938,17 +1030,16 @@ public class TPOChainProto extends GenericProtocol {
             }
         }
     }
-
-
+    
     /**
      * decide并执行Execute实例
      * */
     private void decideAndExecute(InstanceState instance) {
         assert highestDecidedInstance == instance.iN - 1;
         assert !instance.isDecided();
+        
         instance.markDecided();
         highestDecidedInstance++;
-
         //Actually execute message
         logger.debug("Decided: " + instance.iN + " - " + instance.acceptedValue);
         if (instance.acceptedValue.type == PaxosValue.Type.APP_BATCH) {
@@ -990,31 +1081,7 @@ public class TPOChainProto extends GenericProtocol {
         }
     }
 
-    /**
-     * 对于ack包括以前的消息执行
-     * */
-    private void ackInstanceCL(int instanceN) {
-        //For nodes in the first half of the chain only
-        for (int i = highestDecidedInstance + 1; i <= instanceN; i++) {
-            InstanceState ins = instances.get(i);
-            assert !ins.isDecided();
-            decideAndExecute(ins);
-            assert highestDecidedInstance == i;
-        }
-
-        //For everyone
-        for (int i = highestAcknowledgedInstance + 1; i <= instanceN; i++) {
-            InstanceState ins = instances.remove(i);
-            ins.getAttachedReads().forEach((k, v) -> sendReply(new ExecuteReadReply(v, ins.iN), k));
-
-            assert ins.isDecided();
-            //更新ack信息
-            highestAcknowledgedInstance++;
-            assert highestAcknowledgedInstance == i;
-        }
-    }
-
-
+    
     /**
      * leader接收ack信息，对实例进行ack
      * */
@@ -1037,12 +1104,12 @@ public class TPOChainProto extends GenericProtocol {
 
         ackInstance(msg.instanceNumber);
     }
+    
+    
 
 
 
-
-
-
+    
 
     //请求加入集群的客户端方法
 
@@ -1143,6 +1210,10 @@ public class TPOChainProto extends GenericProtocol {
     }
 
 
+    
+    
+    
+    
 
     //加入节点的服务端处理方法
 
@@ -1190,33 +1261,10 @@ public class TPOChainProto extends GenericProtocol {
 
 
 
-    /**
-     * 执行成员Removed OR  addMember操作
-     * */
-    private void executeMembershipOp(InstanceState instance) {
-        MembershipOp o = (MembershipOp) instance.acceptedValue;
-        Host target = o.affectedHost;
-        if (o.opType == MembershipOp.OpType.REMOVE) {
-            logger.info("Removed from membership: " + target + " in inst " + instance.iN);
-            membership.removeMember(target);
-            triggerMembershipChangeNotification();
-            closeConnection(target);
-        } else if (o.opType == MembershipOp.OpType.ADD) {
-            logger.info("Added to membership: " + target + " in inst " + instance.iN);
-            membership.addMember(target, o.position);
-            triggerMembershipChangeNotification();
-            nextOk = membership.nextLivingInChain(self);
-            openConnection(target);
 
-            if (state == TPOChainProto.State.ACTIVE) {
-                sendMessage(new JoinSuccessMsg(instance.iN, instance.highestAccept, membership.shallowCopy()), target);
-                assert highestDecidedInstance == instance.iN;
-                //TODO need mechanism for joining node to inform nodes they can forget stored state
-                pendingSnapshots.put(target, MutablePair.of(instance.iN, instance.counter == QUORUM_SIZE));
-                sendRequest(new GetSnapshotRequest(target, instance.iN), TPOChainFront.PROTOCOL_ID_BASE);
-            }
-        }
-    }
+
+
+    
 
 
 
@@ -1224,12 +1272,8 @@ public class TPOChainProto extends GenericProtocol {
 
 
 
-
-
-
-
-
-
+/**----------------涉及读 写  成员更改--------------------------------------------------- */
+    
 
     /**
      * 当前时leader或正在竞选leader的情况下处理frontend的提交batch
@@ -1253,6 +1297,31 @@ public class TPOChainProto extends GenericProtocol {
     }
 
 
+    /**
+     *发送成员改变的消息
+     */
+    private void uponMembershipOpRequestMsg(MembershipOpRequestMsg msg, Host from, short sourceProto, int channel) {
+        if (amQuorumLeader)
+            sendNextAccept(msg.op);
+        else if (supportedLeader().equals(self))
+            waitingMembershipOps.add(msg.op);
+        else
+            logger.warn("Received " + msg + " without being leader, ignoring.");
+    }
+
+
+
+
+
+
+
+    
+    
+    
+    
+    
+    
+    
 
 
     /**
@@ -1265,14 +1334,17 @@ public class TPOChainProto extends GenericProtocol {
     /**
      * 当向外的连接 建立时的操作  重新向nexotok发断点因为宕机漏发的信息
      * */
+    //这是系统的自动修正
     private void uponOutConnectionUp(OutConnectionUp event, int channel) {
         logger.debug(event);
         if(state == TPOChainProto.State.JOINING)
             return;
         if (membership.contains(event.getNode())) {
             establishedConnections.add(event.getNode());
-            if (event.getNode().equals(nextOk))//进行重发断点的消息
-                for (int i = highestAcceptedInstance; i <= highestAcknowledgedInstance && i >= 0; i++)
+            if (event.getNode().equals(nextOk))//在连接的节点是下一个要发的,进行重发断点的消息
+                //原来是这个怀疑写错了，重新改正
+//                for (int i = highestAcceptedInstance; i <= highestAcknowledgedInstance && i >= 0; i++)
+                for (int i = highestAcknowledgedInstance; i <= highestAcceptedInstance && i >= 0; i++)
                     forward(instances.get(i));
         }
     }
@@ -1294,19 +1366,8 @@ public class TPOChainProto extends GenericProtocol {
                 lastLeaderOp = 0;
         }
     }
-
-    /**
-     *发送成员改变的消息
-     */
-    private void uponMembershipOpRequestMsg(MembershipOpRequestMsg msg, Host from, short sourceProto, int channel) {
-        if (amQuorumLeader)
-            sendNextAccept(msg.op);
-        else if (supportedLeader().equals(self))
-            waitingMembershipOps.add(msg.op);
-        else
-            logger.warn("Received " + msg + " without being leader, ignoring.");
-    }
-
+    
+    
     /**
      * 当向外的连接失败时，设置重连计时器
      * */
@@ -1315,7 +1376,8 @@ public class TPOChainProto extends GenericProtocol {
         if (membership.contains(ev.getNode()))
             setupTimer(new ReconnectTimer(ev.getNode()), RECONNECT_TIME);
     }
-
+    
+    
     /**
      * 重连的具体操作
      * */
@@ -1336,10 +1398,14 @@ public class TPOChainProto extends GenericProtocol {
 
 
 
-
-
-
-
+    
+    
+    
+    
+    
+    
+    
+    
     //  Utils   工具方法
     /**
      * 先取消要删除的节点，将删除节点加入节点列表

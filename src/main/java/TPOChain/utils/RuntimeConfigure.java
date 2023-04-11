@@ -4,13 +4,13 @@ package TPOChain.utils;
 public class RuntimeConfigure {
 
     //各个command leader进行命令的分发
-    public int highestAcceptedInstance = -1;
-    public int highestAcknowledgedInstance = -1;
-
-    public int highestDecidedInstance = -1;
-
     public int lastAcceptSent = -1;
-
+   
+    public int highestAcceptedInstance = -1;
+    
+    public int highestDecidedInstance = -1;
+    public int highestAcknowledgedInstance = -1;
+    
 
     /**
      * 标记每个节点的accptCl

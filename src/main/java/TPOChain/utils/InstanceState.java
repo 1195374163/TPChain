@@ -21,8 +21,8 @@ public class InstanceState {
 
     //附加的读  这个要去掉
     private Map<Short, Queue<Long>> attachedReads;
-
-
+    
+    
 
     /**
      * c-instance和o-instance是否都发了的标记位，在新leader选举时，考虑到是否向leader发送request问题。
