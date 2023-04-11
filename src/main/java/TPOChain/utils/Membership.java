@@ -12,13 +12,11 @@ public class Membership {
 
     private final List<Host> members;
     private final Map<Host, Integer> indexMap;
+    private  final  Map<Host,Boolean>  ChainNode;
     /**
      * 待处理的要删除的节点
      * */
     private final Set<Host> pendingRemoval;
-
-    //打算将indexMap 和 标记故障节点记录在HostConfigure对象中
-    private final  Map<Host,HostConfigure> memConfigure;
 
     private final int MIN_QUORUM_SIZE;
 
@@ -27,34 +25,33 @@ public class Membership {
     public Membership(List<Host> initial, int MIN_QUORUM_SIZE) {
         this.MIN_QUORUM_SIZE = MIN_QUORUM_SIZE;
         members = new ArrayList<>(initial);
-
-        memConfigure=new HashMap<>();
-        initFrontedChain(initial,MIN_QUORUM_SIZE);
-
         indexMap = new HashMap<>();
+        ChainNode = new HashMap<>();
+        int i=0;
+        for (Host temp : initial) {
+            if(i<MIN_QUORUM_SIZE){
+                ChainNode.put(temp,Boolean.TRUE);
+            }else{
+                ChainNode.put(temp,Boolean.FALSE);
+            }
+            i++;
+        }
         pendingRemoval = new HashSet<>();
         //logger.info("New " + this);
         checkSizeAgainstMaxFailures();
     }
 
 
-
-    //对链的节点进行配置，主要是对链的前链和后链的进行标记，有无故障
-    public  void  initFrontedChain(List<Host> initial,int MIN_QUORUM_SIZE){
-        int i=0;
-        for (Host temp : initial) {
-            if(i<MIN_QUORUM_SIZE){
-                memConfigure.put(temp,new HostConfigure(i,true,false));
-            }else{
-                memConfigure.put(temp,new HostConfigure(i,false,false));
-            }
-            i++;
-        }
+    public List<Host> getMembers() {
+        return Collections.unmodifiableList(members);
     }
 
 
-    public List<Host> getMembers() {
-        return Collections.unmodifiableList(members);
+    /**
+     * 设置每个节点为前链节点
+     * */
+    public  void  setFrontedChainNode(Host me){
+        ChainNode.put(me,Boolean.TRUE);
     }
 
 
@@ -72,6 +69,13 @@ public class Membership {
 
 
     /**
+     * 检测前段节点是否为F+1
+     * */
+    public  void  checkFrntedChainIsFplus(){
+
+    }
+
+    /**
      * 判断是否是最后的节点
      * */
     public boolean isAfterLeader(Host me, Host leader, Host other) {
@@ -79,6 +83,8 @@ public class Membership {
             logger.error("Membership does not contain: " + me + " " + leader + " " + other + ".." + members);
         }
         assert contains(me) && contains(leader) && contains(other);
+
+
         if (me.equals(other)) return true;
         int distLeader = distanceFrom(leader, me);
         int distOther = distanceFrom(other, me);
@@ -101,12 +107,27 @@ public class Membership {
         return nextHost;
     }
 
+    /**
+     * 返回当前节点在前段链向右的下一个存活节点s
+     * */
+    public Host nextLivingInFrontedChain(Host myHost) {
+        assert contains(myHost);
+        int nextIndex = (indexOf(myHost) + 1) % members.size();
+        Host nextHost = members.get(nextIndex);
+        while (pendingRemoval.contains(nextHost)) {
+            nextIndex = (nextIndex + 1) % members.size();
+            nextHost = members.get(nextIndex);
+        }
+        return nextHost;
+    }
+
 
     /**
-     * 返回两个主机的距离
+     * 返回两个主机在链表中的距离
      * */
     public int distanceFrom(Host current, Host initial) {
         assert contains(current) && contains(initial);
+
         int currentIndex = indexOf(current);
         int initialIndex = indexOf(initial);
         int dist = currentIndex - initialIndex;
@@ -115,15 +136,31 @@ public class Membership {
     }
 
 
+    /**
+     * 返回节点在链表中的索引
+     * */
     public int indexOf(Host host) {
         return indexMap.computeIfAbsent(host, members::indexOf);
     }
 
-
+    /**
+     * 根据索引判断某个节点是否在链中
+     * */
     public boolean contains(Host host) {
         return indexOf(host) >= 0;
     }
 
+    /**
+     *
+     * */
+    //TODO  判断前链
+    public  boolean containFrontedChain(Host host){
+        boolean is=false;
+
+
+
+        return is;
+    }
 
     public Host nodeAt(int pos){
         return members.get(pos);
@@ -146,14 +183,15 @@ public class Membership {
         checkSizeAgainstMaxFailures();
     }
 
-
+    /**
+     * 彻底删除某个节点
+     * */
     public void removeMember(Host host) {
         if (!contains(host)) {
             logger.error("Removing non-existing host: " + host);
             throw new AssertionError("Trying to remove non-existing host: " + host);
         }
         logger.debug("Removing member: " + host);
-
         indexMap.clear();
         members.remove(host);
         pendingRemoval.remove(host);
@@ -171,6 +209,7 @@ public class Membership {
      * 返回的从当前节点(不包括当前节点)到目标节点(包括目标节点)的所有节点的Iterator
      * */
     public Iterator<Host> nextNodesUntil(Host self, Host h){
+        //forward()的需要
         int myIdx = indexOf(self);
         int lastIdx = indexOf(h);
         if(lastIdx < 0 || myIdx < 0) {
@@ -179,18 +218,15 @@ public class Membership {
         }
         int dist = lastIdx - myIdx;
         if (dist < 0) dist += members.size();
-        List<Host> res = new ArrayList<>(dist);
 
+
+        List<Host> res = new ArrayList<>(dist);
         for(int i = 1 ; i <= dist ; i++){
             res.add(members.get((myIdx + i)%members.size()));
         }
         return res.iterator();
     }
 
-    //进行浅拷贝
-    public List<Host> shallowCopy() {
-        return new ArrayList<>(members);
-    }
 
     public void addToPendingRemoval(Host affectedHost) {
         boolean add = pendingRemoval.add(affectedHost);
@@ -209,4 +245,11 @@ public class Membership {
                 "members=" + members +
                 '}';
     }
+
+
+    //进行浅层拷贝
+    public List<Host> shallowCopy() {
+        return new ArrayList<>(members);
+    }
+
 }

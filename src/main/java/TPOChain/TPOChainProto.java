@@ -62,7 +62,9 @@ public class TPOChainProto extends GenericProtocol {
 
 
 
-
+    /**
+     * 打算废弃
+     * */
     /**
      * 在竞选leader时即候选者时暂存的命令
      * */
@@ -71,19 +73,20 @@ public class TPOChainProto extends GenericProtocol {
 
 
     /**
-     * 代表自身，左右相邻主机
-     * */
-    private final Host self;
-    /**
-     * 消息的下一个节点
-     * */
-    private Host nextOk;
-
-    /**
      * 节点的状态：在加入整个系统中的状态变迁
      * */
     enum State {JOINING, WAITING_STATE_TRANSFER, ACTIVE}
     private TPOChainProto.State state;
+
+    /**
+     * 代表自身，左右相邻主机
+     * */
+    private final Host self;
+
+    /**
+     * 消息的下一个节点
+     * */
+    private Host nextOk;
 
 
 
@@ -92,11 +95,62 @@ public class TPOChainProto extends GenericProtocol {
      * */
     private Membership membership;
 
+
     /**
      * 已经建立连接的主机
      * */
     private final Set<Host> establishedConnections = new HashSet<>();
 
+    /**
+     * 标记是否为前段节点，代表者可以发送command，并向leader发送排序
+     * */
+    private boolean  isFrontedChain;
+
+    /**
+     * 代表着leader，有term 和  Host 二元组组成
+     * */
+    private Map.Entry<Integer, SeqN> currentSN;
+
+    /**
+     * 是否为leader,职能排序
+     * */
+    private boolean amQuorumLeader;
+
+    /**
+     * leader使用，隔断时间发送no-op命令
+     * */
+    private long noOpTimer = -1;
+
+    /**
+     * 保持leader的心跳信息，用系统当前时间减去上次时间
+     * */
+    private long lastAcceptTime;
+
+
+    /**
+     * 打算废弃，将内容打包到Hostconfigure中
+     * */
+    /**
+     * 各个command leader进行命令的分发
+     * */
+    private int highestAcknowledgedInstance = -1;
+    private int highestAcceptedInstance = -1;
+    private int highestDecidedInstance = -1;
+    private int lastAcceptSent = -1;
+
+
+
+
+    /**
+     *leader的排序字段
+     * */
+    /**
+     * 这是主要排序阶段使用
+     * */
+    private int highestAcceptedInstanceCL = -1;
+    private int highestAcknowledgedInstanceCL = -1;
+    private int highestDecidedInstanceCl = -1;
+    private int lastAcceptSentCL = -1;
 
 
     /**
@@ -115,59 +169,46 @@ public class TPOChainProto extends GenericProtocol {
      */
     private final Map<Integer, InstanceStateCL> globalinstances=new HashMap<>(INITIAL_MAP_SIZE);
 
-    //各副本的的一些数据状态：
-    private  Map<Host,HostConfigure>  hostConfigureMap=new HashMap<>();
-
-
 
     /**
-     * 标记是否为前段节点，代表者可以发送command，并向leader发送排序
+     * 对节点的一些配置信息，主要是各前链节点分发的实例信息
+     * 和 接收到accptcl的数量
      * */
-    private boolean  isFrontedChain;
-
-
-    //标志着leader当前是谁，<Integer>是当选为leader的instance的实例号,SeqN是二元组，标志着term和Host
-    private Map.Entry<Integer, SeqN> currentSN;
-    //是否为leader,职能排序
-    private boolean amQuorumLeader;
-    //保持leader的心跳信息，用系统当前时间减去上次时间
-    private long lastAcceptTime;
+    private  Map<Host,RuntimeConfigure>  hostConfigureMap=new HashMap<>();
 
 
 
-    /**
-     * 各个command leader进行命令的分发
-     * */
-    private int highestAcknowledgedInstance = -1;
-    private int highestAcceptedInstance = -1;
-    private int highestDecidedInstance = -1;
-    private int lastAcceptSent = -1;
-
-    //在节点加入系统中的那个实例
-    private int joiningInstance;
 
 
-    /**
-     *leader的排序字段
-     * */
-    private int highestAcknowledgedInstanceCL = -1;
-    private int highestAcceptedInstanceCL = -1;
-    private int highestDecidedInstanceCl = -1;
-    private int lastAcceptSentCL = -1;
+
+
+
+
 
 
     //Timers
-    private long joinTimer = -1;
-    private long stateTransferTimer = -1;
-    private long noOpTimer = -1;
+
+
+
 
     //多长时间没接收到leader消息
     private long leaderTimeoutTimer;
-
     //在每个节点标记上次leader命令的时间
     private long lastLeaderOp;
 
 
+
+
+    /**
+     * 加入节点时需要的一些配置
+     * */
+
+    /**
+     * 在节点加入系统中的那个实例
+     */
+    private int joiningInstance;
+    private long joinTimer = -1;
+    private long stateTransferTimer = -1;
 
     /**
      * 暂存一些系统的节点状态，好让新节点装载
@@ -193,10 +234,15 @@ public class TPOChainProto extends GenericProtocol {
 
 
 
-    //关于节点的tcp通道信息
+
+    /**
+     *关于节点的tcp通道信息
+     */
     private int peerChannel;
 
-    //java中net框架所需要的数据结构
+    /**
+     * java中net框架所需要的数据结构
+     * */
     private final EventLoopGroup workerGroup;
 
     /**
@@ -367,7 +413,7 @@ public class TPOChainProto extends GenericProtocol {
                         // the chain and slowing everything down. Only would happen with leader
                         // election simultaneous with nodes joining.
                         // 下面这是注释的那段文字
-                        // membership.distanceFrom(self, supportedLeader()) <= membership.size() - QUORUM_SIZE
+                         || membership.distanceFrom(self, supportedLeader()) <= membership.size() - QUORUM_SIZE
                         )) {
             tryTakeLeadership();
         }
@@ -658,9 +704,9 @@ public class TPOChainProto extends GenericProtocol {
     }
 
 
+
     //发送排序消息到下一个节点
-    private void sendNextAcceptCL(PaxosValue val) {
-        assert supportedLeader().equals(self) && amQuorumLeader;
+    private void sendNextAcceptCL() {
 
         InstanceState instance = instances.computeIfAbsent(lastAcceptSent + 1, InstanceState::new);
         assert instance.acceptedValue == null && instance.highestAccept == null;
@@ -685,8 +731,6 @@ public class TPOChainProto extends GenericProtocol {
         } else
             nextValue = new NoOpValue();
 
-        this.uponAcceptMsg(new AcceptMsg(instance.iN, currentSN.getValue(),
-                (short) 0, nextValue, highestAcknowledgedInstance), self, this.getProtoId(), peerChannel);
         //参数列表AcceptMsg(int iN, SeqN sN, short nodeCounter, PaxosValue value, int ack)
         // 参数列表uponAcceptMsg(AcceptMsg msg, Host from, short sourceProto, int channel)
         lastAcceptSent = instance.iN;
