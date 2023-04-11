@@ -321,6 +321,8 @@ public class TPOChainProto extends GenericProtocol {
         registerMessageSerializer(peerChannel, StateRequestMsg.MSG_CODE, StateRequestMsg.serializer);
         registerMessageSerializer(peerChannel, StateTransferMsg.MSG_CODE, StateTransferMsg.serializer);
         registerMessageSerializer(peerChannel, UnaffiliatedMsg.MSG_CODE, UnaffiliatedMsg.serializer);
+        //uponOrderMSg
+        registerMessageSerializer(peerChannel, OrderMSg.MSG_CODE, OrderMSg.serializer);
 
         registerMessageHandler(peerChannel, UnaffiliatedMsg.MSG_CODE, this::uponUnaffiliatedMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, AcceptAckMsg.MSG_CODE, this::uponAcceptAckMsg, this::uponMessageFailed);
@@ -341,6 +343,9 @@ public class TPOChainProto extends GenericProtocol {
                 this::uponStateRequestMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, StateTransferMsg.MSG_CODE,
                 this::uponStateTransferMsg, this::uponMessageFailed);
+        //uponOrderMSg
+        registerMessageHandler(peerChannel, OrderMSg.MSG_CODE,
+                this::uponOrderMSg, this::uponMessageFailed);
 
         registerChannelEventHandler(peerChannel, InConnectionDown.EVENT_ID, this::uponInConnectionDown);
         registerChannelEventHandler(peerChannel, InConnectionUp.EVENT_ID, this::uponInConnectionUp);
@@ -353,9 +358,13 @@ public class TPOChainProto extends GenericProtocol {
         registerTimerHandler(LeaderTimer.TIMER_ID, this::onLeaderTimer);
         registerTimerHandler(NoOpTimer.TIMER_ID, this::onNoOpTimer);
         registerTimerHandler(ReconnectTimer.TIMER_ID, this::onReconnectTimer);
-
+        //FlushMsgTimer
+        registerTimerHandler(FlushMsgTimer.TIMER_ID, this::onFlushMsgTimer);
+        
+        
         registerReplyHandler(DeliverSnapshotReply.REPLY_ID, this::onDeliverSnapshot);
 
+        
         registerRequestHandler(SubmitBatchRequest.REQUEST_ID, this::onSubmitBatch);
         registerRequestHandler(SubmitReadRequest.REQUEST_ID, this::onSubmitRead);
 
@@ -373,7 +382,9 @@ public class TPOChainProto extends GenericProtocol {
         logger.info("TPOChainProto: " + membership + " qs " + QUORUM_SIZE);
     }
 
-    
+
+
+
     //接下来几个方法涉及leader选举
     /**
      * 初始状态开始启动
@@ -731,14 +742,15 @@ public class TPOChainProto extends GenericProtocol {
     /**
      * leader负责接收其他前链节点发过来的请求排序消息
      * */
-    private  void  uponOrderMSg(){
+    /**
+     * 处理OrderMsg信息
+     */
+    private void uponOrderMSg(AcceptMsg msg, Host from, short sourceProto, int channel) {
         if (amQuorumLeader){//只有leader才能处理这个排序请求
-            
+
         }else {
-            return;
         }
     }
-    
     /**
      * 生成排序消息发给
      * **/
@@ -944,7 +956,6 @@ public class TPOChainProto extends GenericProtocol {
 
     }
     
-    
     //接下一个方法涉及消息的正常处理accpt
     /**
      *在当前节点是leader时处理，发送 或成员管理 或Noop 或App_Batch信息
@@ -982,7 +993,6 @@ public class TPOChainProto extends GenericProtocol {
         lastAcceptSent = instance.iN;
         lastAcceptTime = System.currentTimeMillis();
     }
-    
     
     
     /**
@@ -1084,6 +1094,7 @@ public class TPOChainProto extends GenericProtocol {
             }
         }
     }
+    
     
     /**
      * decide并执行Execute实例
