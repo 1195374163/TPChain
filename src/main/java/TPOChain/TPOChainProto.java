@@ -931,6 +931,7 @@ public class TPOChainProto extends GenericProtocol {
         
     }
     
+    
     /**
      * 处理accept信息
      */
@@ -1322,7 +1323,7 @@ public class TPOChainProto extends GenericProtocol {
     
     
     
-
+    //TODO 对通道重连不仅要重新发送各个节点的accept信息，还要有leader的排序信息
 
     /**
      * 消息Failed，发出logger.warn("Failed:)
@@ -1398,6 +1399,8 @@ public class TPOChainProto extends GenericProtocol {
 
 
 
+    
+    
     
     
     
