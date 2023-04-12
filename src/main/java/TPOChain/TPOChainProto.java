@@ -210,8 +210,9 @@ public class TPOChainProto extends GenericProtocol {
     private long joinTimer = -1;
     private long stateTransferTimer = -1;
 
+    
     /**
-     * 暂存一些系统的节点状态，好让新节点装载
+     * 暂存一些系统的节点状态，好让新加入节点装载
      * */
     //Dynamic membership
     //TODO eventually forget stored states... (irrelevant for experiments)
@@ -324,6 +325,8 @@ public class TPOChainProto extends GenericProtocol {
         //uponOrderMSg
         registerMessageSerializer(peerChannel, OrderMSg.MSG_CODE, OrderMSg.serializer);
 
+        
+        
         registerMessageHandler(peerChannel, UnaffiliatedMsg.MSG_CODE, this::uponUnaffiliatedMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, AcceptAckMsg.MSG_CODE, this::uponAcceptAckMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, AcceptAckCLMsg.MSG_CODE, this::uponAcceptAckCLMsg, this::uponMessageFailed);
@@ -420,7 +423,7 @@ public class TPOChainProto extends GenericProtocol {
             tryTakeLeadership();
         }
     }
-
+    
 
     /**
      * Attempting to take leadership...
@@ -724,7 +727,7 @@ public class TPOChainProto extends GenericProtocol {
     private void onFlushMsgTimer(FlushMsgTimer timer, long timerId) {
         if (isFrontedChain) {
             assert waitingAppOps.isEmpty() && waitingMembershipOps.isEmpty();
-            if (System.currentTimeMillis() - lastAcceptCLTime > NOOP_SEND_INTERVAL)
+            if (System.currentTimeMillis() - lastAcceptTime > NOOP_SEND_INTERVAL)
                 sendNextAcceptCL(new NoOpValue());
         } else {
             logger.warn(timer + " while not FrontedChain");
@@ -1136,6 +1139,9 @@ public class TPOChainProto extends GenericProtocol {
 
         //For everyone
         for (int i = highestAcknowledgedInstance + 1; i <= instanceN; i++) {
+            /**
+             * 这里进行了垃圾收集，因为是
+             * */
             InstanceState ins = instances.remove(i);
             ins.getAttachedReads().forEach((k, v) -> sendReply(new ExecuteReadReply(v, ins.iN), k));
 
@@ -1171,9 +1177,25 @@ public class TPOChainProto extends GenericProtocol {
     }
     
     
+    //TODO 执行命令,需要确保当一个命令执行时，它之前的命令必须已经执行  
+    // 所以不是同步的，所以有时候可能
+    private void execute(){
+        //
+        //TODO从
+        
+    }
 
 
-
+    //TODO 设置一个时钟，后链首节点定时申请成为前链节点
+    // 当当选成功时
+    
+    
+    
+    
+    
+    
+    
+    
     
 
     //请求加入集群的客户端方法
@@ -1503,8 +1525,8 @@ public class TPOChainProto extends GenericProtocol {
     private Host supportedLeader() {
         return currentSN.getValue().getNode();
     }
-
-
+    
+    
     /**
      * 发送消息给自己和其他主机
      */

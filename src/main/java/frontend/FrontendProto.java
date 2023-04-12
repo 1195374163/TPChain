@@ -25,16 +25,21 @@ public abstract class FrontendProto extends GenericProtocol {
     public static final String ADDRESS_KEY = "frontend_address";
     public static final String PEER_PORT_KEY = "frontend_peer_port";
     private static final Logger logger = LogManager.getLogger(FrontendProto.class);
+    
     protected final int PEER_PORT;
     protected final InetAddress self;
     protected final Application app;
+    //下面着两个生成
     private final int opPrefix;
+    private int opCounter;
+    //第几个Fronted索引
     private final short protoIndex;
+    
     protected int peerChannel;
 
     //系统中节点列表动态的更新
     protected List<InetAddress> membership;
-    private int opCounter;
+
 
     /**
     * 构造函数
@@ -49,7 +54,7 @@ public abstract class FrontendProto extends GenericProtocol {
         opPrefix = ByteBuffer.wrap(self.getAddress()).getInt();
         opCounter = 0;
         membership = null;
-
+        
         this.protoIndex = protoIndex;
     }
 
@@ -81,11 +86,14 @@ public abstract class FrontendProto extends GenericProtocol {
         subscribeNotification(InstallSnapshotNotification.NOTIFICATION_ID, this::onInstallSnapshot);
 
         registerRequestHandler(GetSnapshotRequest.REQUEST_ID, this::onGetStateSnapshot);
+       
+       
         _init(props);
     }
 
     protected abstract void _init(Properties props) throws HandlerRegistrationException;
 
+    
     /**
      * 生成独一无二的有关ip和本地数字的MessageID
      * */
@@ -111,6 +119,9 @@ public abstract class FrontendProto extends GenericProtocol {
      * */
     protected abstract void onPeerBatchMessage(PeerBatchMessage msg, Host from, short sProto, int channel);
 
+    
+    
+    
     protected abstract void onOutConnectionUp(OutConnectionUp event, int channel);
 
     protected abstract void onOutConnectionDown(OutConnectionDown event, int channel);
@@ -129,6 +140,7 @@ public abstract class FrontendProto extends GenericProtocol {
     /* ------------------------------------------- CONSENSUS OPS ------------------------------------------- */
     /* ------------------------------------------- ------------- ------------------------------------------- */
 
+    
     /**
      * 安装快照
      * */

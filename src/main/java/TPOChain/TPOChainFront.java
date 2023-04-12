@@ -36,15 +36,20 @@ public class TPOChainFront extends FrontendProto {
     private final int LOCAL_BATCH_INTERVAL;
     private final int BATCH_SIZE;
     private final int LOCAL_BATCH_SIZE;
-    //Forwarded
+    
+    //Forwarded 对于发送下层协议的批处理，备份保存
     private final Queue<Pair<Long, OpBatch>> pendingWrites;
     private final Queue<Pair<Long, List<byte[]>>> pendingReads;
+    
     private final Object readLock = new Object();
     private final Object writeLock = new Object();
     private Host writesTo;
     private boolean writesToConnected;
+    
     private long lastWriteBatchTime;
     private long lastReadBatchTime;
+    
+    //将用户请求打成批处理
     //ToForward writes
     private List<byte[]> writeDataBuffer;
     //ToSubmit reads
@@ -60,13 +65,16 @@ public class TPOChainFront extends FrontendProto {
         this.LOCAL_BATCH_INTERVAL = Integer.parseInt(props.getProperty(LOCAL_BATCH_INTERVAL_KEY));
         this.BATCH_SIZE = Integer.parseInt(props.getProperty(BATCH_SIZE_KEY));
         this.LOCAL_BATCH_SIZE = Integer.parseInt(props.getProperty(LOCAL_BATCH_SIZE_KEY));
-
+        
+        //象征着leader
         writesTo = null;
         writesToConnected = false;
-
+        
+        //缓存用户端来的请求达成批处理
         writeDataBuffer = new ArrayList<>(BATCH_SIZE);
         readDataBuffer = new ArrayList<>(LOCAL_BATCH_SIZE);
 
+        //记录发到下层协议层的批处理，准备回复客户端
         pendingWrites = new ConcurrentLinkedQueue<>();
         pendingReads = new ConcurrentLinkedQueue<>();
     }
@@ -102,9 +110,13 @@ public class TPOChainFront extends FrontendProto {
         final int minTimer = Math.min(LOCAL_BATCH_INTERVAL, BATCH_INTERVAL);
         setupPeriodicTimer(new BatchTimer(), minTimer, minTimer);
 
-        registerReplyHandler(ExecuteReadReply.REPLY_ID, this::onExecuteRead);
-
+        
         registerTimerHandler(ReconnectTimer.TIMER_ID, this::onReconnectTimer);
+        
+        
+        registerReplyHandler(ExecuteReadReply.REPLY_ID, this::onExecuteRead);
+        
+        
         lastWriteBatchTime = System.currentTimeMillis();
         lastReadBatchTime = System.currentTimeMillis();
     }
@@ -152,7 +164,9 @@ public class TPOChainFront extends FrontendProto {
         sendBatchToWritesTo(new PeerBatchMessage(batch));
         lastWriteBatchTime = System.currentTimeMillis();
     }
-
+    
+    
+    //TODO  这里不用发送到leader处理
     /**
      * 将写信息转发至writeTo即leader处理
      * */
@@ -161,6 +175,7 @@ public class TPOChainFront extends FrontendProto {
         else if (writesToConnected) sendMessage(peerChannel, msg, writesTo);
     }
 
+    
     /**
      * 只传递写的batch信息到protocol层
      * */
@@ -175,6 +190,7 @@ public class TPOChainFront extends FrontendProto {
     }
 
 
+    
     /**
      * 将客户端来的读信息处理：若满足指定size的batch，则进行此项处理
      */
@@ -185,16 +201,9 @@ public class TPOChainFront extends FrontendProto {
         sendRequest(new SubmitReadRequest(internalId, getProtoId()),TPOChainProto.PROTOCOL_ID);
         lastReadBatchTime = System.currentTimeMillis();
     }
+    
 
-
-
-
-
-    /**
-     * 设置一些时钟
-     * */
-
-    /* --------------------  TIMERS  ----------------------------------------------- */
+                        /* ---  TIMERS  ---- */
 
     /**
      * 在batch时间间隔内开启处理sendNewReadBatch()或sendNewWriteBatch()
@@ -219,25 +228,14 @@ public class TPOChainFront extends FrontendProto {
             }
     }
 
+
+
+
+
+
+    
     /**
-     * 与 writesTo尝试重新建立连接
-     * */
-    private void onReconnectTimer(ReconnectTimer timer, long timerId) {
-        if (timer.getHost().equals(writesTo)) {
-            logger.info("Trying to reconnect to writesTo " + timer.getHost());
-            openConnection(timer.getHost());
-        }
-    }
-
-
-
-
-
-
-
-
-    /**
-     * 在TCP连接下一个节点，将pendingWrites逐条发送到下一个节点
+     * 在TCP连接writesTO节点时，将pendingWrites逐条发送到下一个节点
      * */
     protected void onOutConnectionUp(OutConnectionUp event, int channel) {
         Host peer = event.getNode();
@@ -278,15 +276,22 @@ public class TPOChainFront extends FrontendProto {
     }
 
 
-
-
-
-
-
     /**
-     * 回调函数
-     * 以下三个函数涉及对 写操作  读操作  成员改变操作 的具体操作
+     * 与 writesTo尝试重新建立连接
      * */
+    private void onReconnectTimer(ReconnectTimer timer, long timerId) {
+        if (timer.getHost().equals(writesTo)) {
+            logger.info("Trying to reconnect to writesTo " + timer.getHost());
+            openConnection(timer.getHost());
+        }
+    }
+
+
+
+
+
+
+
 
     /* -------------------- CONSENSUS OPS ----------------------------------------------- */
 
@@ -348,5 +353,5 @@ public class TPOChainFront extends FrontendProto {
                 openConnection(writesTo, peerChannel);
         }
     }
-
+    
 }
