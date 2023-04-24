@@ -5,6 +5,7 @@ import pt.unl.fct.di.novasys.network.ISerializer;
 
 import java.io.IOException;
 
+
 public abstract class PaxosValue {
 
     interface ValueSerializer<T extends PaxosValue> extends ISerializer<T> {
@@ -12,10 +13,17 @@ public abstract class PaxosValue {
 
     //Enum adapted from Apache Cassandra
     public enum Type {
+        /**
+         * 枚举之间是逗号
+         * */
         MEMBERSHIP(0, MembershipOp.serializer),
         APP_BATCH(1, AppOpBatch.serializer),
-        NO_OP(2, NoOpValue.serializer);
-
+        NO_OP(2, NoOpValue.serializer),
+        SORT(3,SortValue.serializer);
+        
+        
+        
+        
         public final int opcode;
         private final ValueSerializer<PaxosValue> serializer;
 
@@ -24,9 +32,11 @@ public abstract class PaxosValue {
             this.serializer = serializer;
         }
 
-
+        
+        
+        
         /**
-         * 进行索引
+         * 进行初始化枚举量的索引
          * */
         private static final Type[] opcodeIdx;
         /**
@@ -43,7 +53,7 @@ public abstract class PaxosValue {
                 opcodeIdx[type.opcode] = type;
             }
         }
-
+        
         /**
          * 根据int进行转化成对应的枚举类型
          * */
@@ -57,6 +67,7 @@ public abstract class PaxosValue {
         }
     }
 
+    
     public final Type type;
 
     PaxosValue(Type type) {
@@ -66,6 +77,7 @@ public abstract class PaxosValue {
     @Override
     public abstract boolean equals(Object other);
 
+    
     public static final ISerializer<PaxosValue> serializer = new ISerializer<>() {
         public void serialize(PaxosValue value, ByteBuf out) throws IOException {
             out.writeInt(value.type.opcode);

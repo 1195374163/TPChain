@@ -5,6 +5,8 @@ import pt.unl.fct.di.novasys.network.data.Host;
 
 import java.util.*;
 
+//TODO leader除了发送排序消息，还有成员的更改消息
+// 有NOOP消息，有MembershipOP消息
 public class InstanceStateCL {
 
     public final int iN;
@@ -12,13 +14,17 @@ public class InstanceStateCL {
     //public PaxosValue acceptedValue;
     //上面这个不需要，反而是需要<node，sequence>标识一个acceptedValue
     public Host node;//哪个commandleader发出的
-    public int  sequence;//在commandleader的第几个位置
+    public int  sequence;//在commandleader的第几个位置，即为commandleader的实例iN
 
+    
+    
     //ack的数量
     public short counter;
     private boolean decided;
+    
     public Map<SeqN, Set<Host>> prepareResponses;
-    //附加的读
+    
+    //附加的读,用于读取操作
     private Map<Short, Queue<Long>> attachedReads;
 
 
@@ -31,17 +37,20 @@ public class InstanceStateCL {
     public InstanceStateCL(int iN) {
         this.iN = iN;
         this.highestAccept = null;
-        this.counter = 0;
-        this.decided = false;
-        this.prepareResponses = new HashMap<>();
-        this.attachedReads = new HashMap<>();
+
         this.node=null;//哪个commandleader发出的
         this.sequence=0;//在commandleader的第几个位置
+        
+        this.counter = 0;
+        this.decided = false;
+        
+        this.prepareResponses = new HashMap<>();
+        this.attachedReads = new HashMap<>();
     }
 
     @Override
     public String toString() {
-        return "InstanceState{" +
+        return "InstanceStateCL{" +
                 "iN=" + iN +
                 ", highestAccept=" + highestAccept +
                 ", Host=" + node +
@@ -61,7 +70,8 @@ public class InstanceStateCL {
         return attachedReads;
     }
 
-
+    
+    //TODO 这个forceAccept用在什么情况
     //If it is already decided by some node, or received from prepareOk
     /**
      * 更新SeqN和counter信息，准备重新发送
@@ -73,18 +83,24 @@ public class InstanceStateCL {
 //        assert !isDecided() || acceptedValue.equals(value);
 //        assert highestAccept == null || sN.greaterThan(highestAccept) || acceptedValue.equals(value);
         this.highestAccept = sN.greaterThan(this.highestAccept) ? sN : this.highestAccept;
+        
         this.node=node;//哪个commandleader发出的
         this.sequence=sequence;//在commandleader的第几个位置
+        
         this.counter = -1;
     }
-
+    
+    //对instance进行投票
     public void accept(SeqN sN,Host node,int sequence, short counter) {
         this.highestAccept = sN;
+        
         this.node=node;//哪个commandleader发出的
         this.sequence=sequence;//在commandleader的第几个位置
+        
         this.counter = counter;
     }
 
+    
     public boolean isDecided() {
         return decided;
     }

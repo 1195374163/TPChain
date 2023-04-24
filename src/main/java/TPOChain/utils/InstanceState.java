@@ -9,19 +9,20 @@ import java.util.*;
  * instance的实例
  * */
 public class InstanceState {
-
-    public final int iN;
     //要对SeqN进行改造，Seq的Node节点标记从哪个commandleader发来的
     public SeqN highestAccept;
+    public final int iN;
+    
     public PaxosValue acceptedValue;
     public short counter;
     private boolean decided;
-    //这个要去掉，
-    public Map<SeqN, Set<Host>> prepareResponses;
+//    //TODO 这个要去掉，
+//    public Map<SeqN, Set<Host>> prepareResponses;
 
-    //附加的读  这个要去掉
-    private Map<Short, Queue<Long>> attachedReads;
     
+//    //TODO 附加的读  这个要去掉
+//    private Map<Short, Queue<Long>> attachedReads;
+//    
     
 
     /**
@@ -31,11 +32,12 @@ public class InstanceState {
     public InstanceState(int iN) {
         this.iN = iN;
         this.highestAccept = null;
+        
         this.acceptedValue = null;
         this.counter = 0;
         this.decided = false;
-        this.prepareResponses = new HashMap<>();
-        this.attachedReads = new HashMap<>();
+//        this.prepareResponses = new HashMap<>();
+//        this.attachedReads = new HashMap<>();
     }
 
     @Override
@@ -46,19 +48,21 @@ public class InstanceState {
                 ", acceptedValue=" + acceptedValue +
                 ", counter=" + counter +
                 ", decided=" + decided +
-                ", prepareResponses=" + prepareResponses +
+//                ", prepareResponses=" + prepareResponses +
                 '}';
     }
+    
+    //对读取消，在传播消息的instance不附加读请求，将读请求附加在排序的请求上
+    
+//    public void attachRead(SubmitReadRequest request) {
+//        if (decided) throw new IllegalStateException();
+//        attachedReads.computeIfAbsent(request.getFrontendId(), k -> new LinkedList<>()).add(request.getBatchId());
+//    }
+//    public Map<Short, Queue<Long>> getAttachedReads() {
+//        return attachedReads;
+//    }
 
-    public void attachRead(SubmitReadRequest request) {
-        if (decided) throw new IllegalStateException();
-        attachedReads.computeIfAbsent(request.getFrontendId(), k -> new LinkedList<>()).add(request.getBatchId());
-    }
-
-    public Map<Short, Queue<Long>> getAttachedReads() {
-        return attachedReads;
-    }
-
+    
     //If it is already decided by some node, or received from prepareOk
     /**
      * 更新SeqN和counter信息，准备重新发送
@@ -75,6 +79,7 @@ public class InstanceState {
         this.counter = -1;
     }
 
+    //在对对应的instance重新进行赋值
     public void accept(SeqN sN, PaxosValue value, short counter) {
         assert sN.getCounter() > -1;
         assert value != null;

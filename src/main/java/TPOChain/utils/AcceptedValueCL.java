@@ -6,15 +6,17 @@ import pt.unl.fct.di.novasys.network.data.Host;
 import java.io.IOException;
 
 /**
- * 全局排序的accpet信息
+ * 落后节点学习全局排序的accpet信息
  * */
 public class AcceptedValueCL {
     public final int instance;
     public final SeqN sN;
-//    public final PaxosValue value;
+//  public final PaxosValue value;
     public Host node;//哪个commandleader发出的
     public int  sequence;//在commandleader的第几个位置
 
+    
+    
     public AcceptedValueCL(int instance, SeqN sN, Host node,int sequence) {
         this.instance = instance;
         this.sN = sN;
@@ -25,7 +27,7 @@ public class AcceptedValueCL {
 
     @Override
     public String toString() {
-        return "AV{" +
+        return "AVCL{" +
                 "i=" + instance +
                 ", sn=" + sN +
                 ", host=" + node +

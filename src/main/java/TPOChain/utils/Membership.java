@@ -94,6 +94,7 @@ public class Membership {
     }
 
     //TODO  判断是链尾
+    
     /**
      * 判断后链的节点是否是链中的最后的节点
      * */

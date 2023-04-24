@@ -62,9 +62,8 @@ public class TPOChainProto extends GenericProtocol {
 
 
 
-    /**
-     * 打算废弃
-     * */
+    
+    //TODO 打算废弃
     /**
      * 在竞选leader时即候选者时暂存的命令
      * */
@@ -179,8 +178,8 @@ public class TPOChainProto extends GenericProtocol {
     /**
      * 局部日志
      */
-    private final Map<Integer, InstanceState> instances = new HashMap<>(INITIAL_MAP_SIZE);
-//    private final Map<Integer,Map<Integer, InstanceState>> instances = new HashMap<>(INITIAL_MAP_SIZE);
+//    private final Map<Integer, InstanceState> instances = new HashMap<>(INITIAL_MAP_SIZE);
+    private final Map<Integer,Map<Integer, InstanceState>> instances = new HashMap<>(INITIAL_MAP_SIZE);
 
     /**
      * 全局日志
@@ -737,8 +736,17 @@ public class TPOChainProto extends GenericProtocol {
     
     
 
+    //TODO  若前链节点不满足F+1，对后链的首节点进行pull协议
+    private  void  pullfirstBackHeadNode(){
+        
+        
+    }
 
-
+    
+    
+    
+    
+    
     
 /**------leader的重新发送排序命令，也可以包括成员添加，删除操作--**/
 

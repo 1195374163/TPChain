@@ -10,6 +10,7 @@ import java.io.IOException;
 public class AcceptedValue {
     public final int instance;
     public final SeqN sN;
+    
     public final PaxosValue value;
 
     public AcceptedValue(int instance, SeqN sN, PaxosValue value) {
