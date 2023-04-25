@@ -10,18 +10,26 @@ public class Membership {
 
     private static final Logger logger = LogManager.getLogger(Membership.class);
     
+    //有序
     //存放了系统中的节点
+    //以这个为主，附加一个hashmap，显示这个节点是前链还是后链
     private final List<Host> members;
+    //作为缓存，存放元素的索引位置
     private final Map<Host, Integer> indexMap;
-    //代表着系统中前链
-    private  final  Map<Host,Boolean>  chainNode;
     
+    
+    //所有节点在前链的标识，true标识前链，false标识后链
+    private  final  Map<Host,Boolean> frontedChainNode;
+    
+    //对于要删除的节点，还保留着原来在list中的位置，并且将其纳入pendingRemoval集合
+    //在查询下一个节点要跳过这个节点
     /**
      * 待处理的要删除的节点
      * */
     private final Set<Host> pendingRemoval;
     
-    //标记着系统中最小的运行数量，也是系统中要求前链的数量
+    //标记着系统中最小的运行数量，
+    //也是系统中要求前链的数量
     //此字段代表着F+1
     private final int MIN_QUORUM_SIZE;
 
@@ -31,16 +39,27 @@ public class Membership {
         this.MIN_QUORUM_SIZE = MIN_QUORUM_SIZE;
         members = new ArrayList<>(initial);
         indexMap = new HashMap<>();
-        chainNode = new HashMap<>();
+        
+        frontedChainNode = new HashMap<>();
         int i=0;
         for (Host temp : initial) {
             if(i<MIN_QUORUM_SIZE){
-                chainNode.put(temp,Boolean.TRUE);
+                frontedChainNode.put(temp,Boolean.TRUE);
             }else{
-                chainNode.put(temp,Boolean.FALSE);
+                frontedChainNode.put(temp,Boolean.FALSE);
             }
             i++;
         }
+        
+        //输出前链节点
+        for (HashMap.Entry<Host, Boolean> entry : frontedChainNode.entrySet()) {
+            Host key = entry.getKey();
+            Boolean value = entry.getValue();
+            if (value.equals(Boolean.TRUE)){
+                logger.info("前链节点 " + key);
+            }
+        }
+        
         pendingRemoval = new HashSet<>();
         //logger.info("New " + this);
         checkSizeAgainstMaxFailures();
@@ -56,7 +75,7 @@ public class Membership {
      * 设置某个节点为前链节点
      * */
     public  void  setFrontedChainNode(Host me){
-        chainNode.put(me,Boolean.TRUE);
+        frontedChainNode.put(me,Boolean.TRUE);
     }
 
 
@@ -76,10 +95,10 @@ public class Membership {
     /**
      * 检测前段节点是否为QUORUM  F+1
      * */
-    public  boolean checkFrntedChainIsQUORUM(){
+    public  boolean checkFrontedChainIsQUORUM(){
         int frontedNodeSum=0;
         checkSizeAgainstMaxFailures();
-        for (Map.Entry<Host, Boolean> entry : chainNode.entrySet()) {
+        for (Map.Entry<Host, Boolean> entry : frontedChainNode.entrySet()) {
             Boolean value = entry.getValue();
             if (value.equals(Boolean.TRUE)){
                 frontedNodeSum++;
@@ -94,7 +113,6 @@ public class Membership {
     }
 
     //TODO  判断是链尾
-    
     /**
      * 判断后链的节点是否是链中的最后的节点
      * */
@@ -112,9 +130,10 @@ public class Membership {
         return distOther >= distLeader;
     }
 
-
+    
+    //TODO  排序应该先前链 ，后后链
     /**
-     * 返回当前节点向右的下一个存活节点s
+     * 返回当前节点向右的下一个存活节点s 主要排序过程需要
      * */
     public Host nextLivingInChain(Host myHost) {
         assert contains(myHost);
@@ -128,6 +147,7 @@ public class Membership {
     }
     
     
+    //分发过程需要这些字段
     //TODO 返回前链的下一个节点
     /**
      * 返回当前节点在前段链的下一个存活节点s
@@ -136,13 +156,19 @@ public class Membership {
         assert contains(myHost);
         int nextIndex = (indexOf(myHost) + 1) % members.size();
         Host nextHost = members.get(nextIndex);
-        while (chainNode.get(nextHost).equals(Boolean.FALSE) || pendingRemoval.contains(nextHost)){
+        while (frontedChainNode.get(nextHost).equals(Boolean.FALSE) || pendingRemoval.contains(nextHost)){
             nextIndex = (nextIndex + 1) % members.size();
             nextHost = members.get(nextIndex);
         }
         return nextHost;
     }
 
+    /**
+     * 返回前链中是否存在指定节点的boolean值
+     * **/
+    public boolean frontcontains(Host host) {
+        return indexOf(host) >= 0;
+    }
 
     /**
      * 返回当前节点在后段链的下一个存活节点s
@@ -158,6 +184,10 @@ public class Membership {
         return nextHost;
     }
 
+    
+    
+    
+    
     /**
      * 返回两个主机在链表中的距离
      * */
@@ -188,12 +218,14 @@ public class Membership {
     }
 
     
+    
+    
     /**
      *判断一个节点是否在前链中
      * */
     //TODO  判断前链
     public  boolean containFrontedChain(Host host){
-        return chainNode.get(host);
+        return frontedChainNode.get(host);
     }
     
     /**
@@ -203,7 +235,14 @@ public class Membership {
         return members.get(pos);
     }
 
-
+    
+    
+    
+    //这两个
+    
+    /**
+     * 在添加节点时用
+     * */
     public void addMember(Host host, int position) {
         if (contains(host)) {
             logger.error("Trying to add already existing host: " + host);
@@ -236,6 +275,9 @@ public class Membership {
         checkSizeAgainstMaxFailures();
     }
 
+    
+    
+    
 
     public int size() {
         return members.size();
@@ -265,6 +307,10 @@ public class Membership {
     }
 
 
+    
+    
+    
+    //在删除操作时，先进行标记，后进行删除
     public void addToPendingRemoval(Host affectedHost) {
         boolean add = pendingRemoval.add(affectedHost);
         assert add;
@@ -276,17 +322,19 @@ public class Membership {
     }
 
 
+    
+    
     @Override
     public String toString() {
         return "{" +
                 "members=" + members +
                 '}';
     }
-
+    
 
     //进行浅层拷贝
+    //这里不需要改变，因为调用这个方法的是刚加入节点向全体广播 joinsuccessMsg
     public List<Host> shallowCopy() {
         return new ArrayList<>(members);
     }
-
 }

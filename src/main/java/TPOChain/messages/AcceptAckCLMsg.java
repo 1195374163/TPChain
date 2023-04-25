@@ -17,6 +17,8 @@ public class AcceptAckCLMsg extends ProtoMessage {
     //二元组 标识哪个节点的第几个序号
     public final Host node;
     public final int iN;
+    
+    
 
 
     public AcceptAckCLMsg(int instanceNumber,Host node,int iN) {

@@ -8,7 +8,7 @@ import pt.unl.fct.di.novasys.network.data.Host;
 import java.io.IOException;
 
 /**
- * 请求排序信息
+ * 请求排序信息  reguest消息
  * */
 public class OrderMSg extends ProtoMessage {
 

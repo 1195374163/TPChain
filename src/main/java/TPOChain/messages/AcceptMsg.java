@@ -25,8 +25,10 @@ public class AcceptMsg extends ProtoMessage {
         super(MSG_CODE);
         this.node=node;
         this.iN = iN;
+        
         this.sN = sN;
         this.value = value;
+        
         this.nodeCounter = nodeCounter;
         this.ack = ack;
     }

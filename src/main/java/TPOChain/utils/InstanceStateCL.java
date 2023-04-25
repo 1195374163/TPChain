@@ -1,6 +1,7 @@
 package TPOChain.utils;
 
 import TPOChain.ipc.SubmitReadRequest;
+import common.values.PaxosValue;
 import pt.unl.fct.di.novasys.network.data.Host;
 
 import java.util.*;
@@ -11,13 +12,12 @@ public class InstanceStateCL {
 
     public final int iN;
     public SeqN highestAccept;
-    //public PaxosValue acceptedValue;
-    //上面这个不需要，反而是需要<node，sequence>标识一个acceptedValue
-    public Host node;//哪个commandleader发出的
-    public int  sequence;//在commandleader的第几个位置，即为commandleader的实例iN
+    public PaxosValue acceptedValue;
+//       
+//    public Host node;//哪个commandleader发出的
+//    public int  sequence;//在commandleader的第几个位置，即为commandleader的实例iN
 
-    
-    
+
     //ack的数量
     public short counter;
     private boolean decided;
@@ -33,14 +33,10 @@ public class InstanceStateCL {
      */
 
     //private  boolean   coconcurrency;
-    //重写
     public InstanceStateCL(int iN) {
         this.iN = iN;
         this.highestAccept = null;
-
-        this.node=null;//哪个commandleader发出的
-        this.sequence=0;//在commandleader的第几个位置
-        
+        this.acceptedValue=null;
         this.counter = 0;
         this.decided = false;
         
@@ -53,14 +49,14 @@ public class InstanceStateCL {
         return "InstanceStateCL{" +
                 "iN=" + iN +
                 ", highestAccept=" + highestAccept +
-                ", Host=" + node +
-                ", sequence=" + sequence +
+                ", acceptedValue=" + acceptedValue +
                 ", counter=" + counter +
                 ", decided=" + decided +
                 ", prepareResponses=" + prepareResponses +
                 '}';
     }
-
+    
+    
     public void attachRead(SubmitReadRequest request) {
         if (decided) throw new IllegalStateException();
         attachedReads.computeIfAbsent(request.getFrontendId(), k -> new LinkedList<>()).add(request.getBatchId());
@@ -76,27 +72,21 @@ public class InstanceStateCL {
     /**
      * 更新SeqN和counter信息，准备重新发送
      * */
-    public void forceAccept(SeqN sN, Host node,int sequence) {
+    public void forceAccept(SeqN sN, PaxosValue acceptedValue) {
 //        assert sN.getCounter() > -1;
 //        assert value != null;
 //        assert highestAccept == null || sN.greaterOrEqualsThan(highestAccept);
 //        assert !isDecided() || acceptedValue.equals(value);
 //        assert highestAccept == null || sN.greaterThan(highestAccept) || acceptedValue.equals(value);
         this.highestAccept = sN.greaterThan(this.highestAccept) ? sN : this.highestAccept;
-        
-        this.node=node;//哪个commandleader发出的
-        this.sequence=sequence;//在commandleader的第几个位置
-        
+        this.acceptedValue=acceptedValue;
         this.counter = -1;
     }
     
     //对instance进行投票
-    public void accept(SeqN sN,Host node,int sequence, short counter) {
+    public void accept(SeqN sN,PaxosValue acceptedValue, short counter) {
         this.highestAccept = sN;
-        
-        this.node=node;//哪个commandleader发出的
-        this.sequence=sequence;//在commandleader的第几个位置
-        
+        this.acceptedValue=acceptedValue;
         this.counter = counter;
     }
 

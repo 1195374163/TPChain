@@ -12,7 +12,6 @@ public class InstanceState {
     //要对SeqN进行改造，Seq的Node节点标记从哪个commandleader发来的
     public SeqN highestAccept;
     public final int iN;
-    
     public PaxosValue acceptedValue;
     public short counter;
     private boolean decided;
@@ -32,7 +31,6 @@ public class InstanceState {
     public InstanceState(int iN) {
         this.iN = iN;
         this.highestAccept = null;
-        
         this.acceptedValue = null;
         this.counter = 0;
         this.decided = false;
@@ -62,7 +60,7 @@ public class InstanceState {
 //        return attachedReads;
 //    }
 
-    
+    //TODO    forceAccept和accpt区别
     //If it is already decided by some node, or received from prepareOk
     /**
      * 更新SeqN和counter信息，准备重新发送
