@@ -452,7 +452,7 @@ public class TPOChainProto extends GenericProtocol {
                         // the chain and slowing everything down. Only would happen with leader
                         // election simultaneous with nodes joining.
                         // 下面这是注释的那段文字
-                         || membership.distanceFrom(self, supportedLeader()) <= membership.size() - QUORUM_SIZE
+//                         || membership.distanceFrom(self, supportedLeader()) <= membership.size() - QUORUM_SIZE
                         )) {
             tryTakeLeadership();
         }
@@ -1084,7 +1084,8 @@ public class TPOChainProto extends GenericProtocol {
         lastLeaderOp = System.currentTimeMillis();//进行更新领导操作时间
 
         assert msg.sN.equals(currentSN.getValue());
-
+        
+        //在这里可能取消了删除节点，后续真的删除节点时也在后面的mark中重新加入节点
         maybeCancelPendingRemoval(instance.acceptedValue);
         instance.accept(msg.sN, msg.value, (short) (msg.nodeCounter + 1));//进行对实例的确定
 
