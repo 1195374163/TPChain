@@ -17,9 +17,11 @@ public class MembershipOp extends PaxosValue {
         OpType(int value) {
             this.value = value;
         }
-
-
-
+        
+        int value() {
+            return value;
+        }
+        
         static OpType fromValue(int value) {
             for (OpType type : OpType.values()) {
                 if (type.value == value) {
@@ -27,10 +29,6 @@ public class MembershipOp extends PaxosValue {
                 }
             }
             return null;
-        }
-
-        int value() {
-            return value;
         }
     }
 
@@ -61,8 +59,7 @@ public class MembershipOp extends PaxosValue {
     public static MembershipOp AddOp(Host affectedHost){
         return new MembershipOp(OpType.ADD, affectedHost, -1);
     }
-
-
+    
 
     @Override
     public String toString() {
@@ -99,5 +96,4 @@ public class MembershipOp extends PaxosValue {
             return new MembershipOp(t, affectedHost, position);
         }
     };
-
 }

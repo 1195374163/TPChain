@@ -10,27 +10,30 @@ public class Membership {
 
     private static final Logger logger = LogManager.getLogger(Membership.class);
     
-    //有序
-    //存放了系统中的节点
-    //以这个为主，附加一个hashmap，显示这个节点是前链还是后链，同时附加一个标记hashmap
-    //显示这个节点是标记删除的吗
     
+    //节点之间有序 存放了系统中的节点
+    //以这个为主，附加一个hashmap，显示这个节点是前链还是后链，
+    //同时附加一个标记hashmap显示这个节点是标记删除的吗
     private final List<Host> members;
+    
+    
+    
     //作为缓存，存放元素的索引位置
     private final Map<Host, Integer> indexMap;
+    
     
     //所有节点在前链的标识，true标识前链，false标识后链
     private  final  Map<Host,Boolean> frontedChainNode;
     
     //对于要删除的节点，还保留着原来在list中的位置，并且将其纳入pendingRemoval集合
-    //在查询下一个节点要跳过这个节点
+    //在查询得到下一个节点要跳过这个节点
     /**
      * 待处理的要删除的节点
      * */
     private final Set<Host> pendingRemoval;
     
-    //标记着系统中最小的运行数量，
-    //也是系统中要求前链的数量
+
+    //标记着系统中最小的运行数量，也是系统中要求前链的数量
     //此字段代表着F+1
     private final int MIN_QUORUM_SIZE;
 
@@ -44,22 +47,25 @@ public class Membership {
         frontedChainNode = new HashMap<>();
         int i=0;
         for (Host temp : initial) {
-            if(i<MIN_QUORUM_SIZE){
+            if(i<MIN_QUORUM_SIZE){//为前链
                 frontedChainNode.put(temp,Boolean.TRUE);
-            }else{
+            }else{//为后链
                 frontedChainNode.put(temp,Boolean.FALSE);
             }
             i++;
         }
         
-        //输出前链节点
+        //调试输出前链节点
+        List<Host> frontChainNode=new ArrayList();
         for (HashMap.Entry<Host, Boolean> entry : frontedChainNode.entrySet()) {
             Host key = entry.getKey();
             Boolean value = entry.getValue();
             if (value.equals(Boolean.TRUE)){
-                logger.warn("前链节点 " + key);
+                frontChainNode.add(key);
             }
         }
+        logger.warn("前链节点 " + frontChainNode.toString());
+        
         
         pendingRemoval = new HashSet<>();
         //logger.info("New " + this);
@@ -126,6 +132,13 @@ public class Membership {
     public Host nextLivingInBackChain(Host myHost) {
         assert contains(myHost);
         
+        //特殊判定
+        //如果是前链节点，后链的首节点一定是它的nextBackChainNode
+        if (frontedChainNode.get(myHost).equals(Boolean.TRUE)){
+            return getBackChainHead();
+        }
+        //后面是后链节点的流程
+        
         int nextIndex = (indexOf(myHost) + 1) % members.size();
         Host nextHost = members.get(nextIndex);
         //当是 前链 或者  标记节点中包括此节点 ，下一次循环
@@ -154,7 +167,7 @@ public class Membership {
         if (dist < 0) dist += members.size();
 
         List<Host> res = new ArrayList<>(dist);
-        //暂存目标节点的前链后链标志位
+        //暂存  目标节点的前链后链标志位
         Boolean tempboool=frontedChainNode.get(h);
         for(int i = 1 ; i <= dist ; i++){
             Host temp=members.get((myIdx + i)%members.size());
@@ -172,7 +185,7 @@ public class Membership {
      * */
     public Host getBackChainHead(){
         for (Host temp:members) {
-            if (frontedChainNode.get(temp).equals(Boolean.FALSE)){
+            if (frontedChainNode.get(temp).equals(Boolean.FALSE) && !pendingRemoval.contains(temp)){
                 return  temp;
             }
         }
@@ -185,7 +198,7 @@ public class Membership {
     public Host getBackChainTail(){
         for (int i = members.size() - 1; i >= 0; i--) {
             Host temp=members.get(i);
-            if (frontedChainNode.get(temp).equals(Boolean.FALSE))
+            if (frontedChainNode.get(temp).equals(Boolean.FALSE) && !pendingRemoval.contains(temp))
                 return temp;
         }
         return null;//不应该到这
@@ -208,14 +221,28 @@ public class Membership {
         }
         return priorHost;
     }
+    
+    
+    /**
+     * 判断一个节点是否为前链节点
+     * */
+    public Boolean  isFrontChainNode(Host temp){
+        return frontedChainNode.get(temp);
+    }
+
+
+    //应该在前链节点被标记的时候
+    /**
+     * 设置某个节点为前链节点
+     * */
+    public  void  setFrontChainNode(Host me){
+        frontedChainNode.put(me,Boolean.TRUE);
+    }
+
 
 
 
     
-    
-
-
-
     /**
      * 返回节点在链表中的索引
      * */
@@ -236,6 +263,7 @@ public class Membership {
     
     //这两个函数在节点增删时使用
     //TODO 添加节点的位置
+    //调用时position的位置设为后链链尾的位置
     /**
      * 在添加节点时用,
      * */
@@ -253,7 +281,6 @@ public class Membership {
         members.add(position, host);
         //节点添加都是后链末尾添加
         frontedChainNode.put(host,Boolean.FALSE);
-        
         logger.debug("New " + this);
         checkSizeAgainstMaxFailures();
     }
@@ -290,7 +317,7 @@ public class Membership {
             int indexbackChainHead=indexOf(backChainHead);
             int indexaffectedHost=indexOf(affectedHost);
             
-            //对两个节点的前链的标志位进行更改
+            //对两个节点的前链的标志位进行更改 
             frontedChainNode.put(affectedHost,Boolean.FALSE);
             frontedChainNode.put(backChainHead,Boolean.TRUE);
             
@@ -312,17 +339,7 @@ public class Membership {
         assert remove;
     }
 
-    
-//    //应该在前链节点被标记的时候
-//    /**
-//     * 设置某个节点为前链节点
-//     * */
-//    public  void  setFrontedChainNode(Host me){
-//        frontedChainNode.put(me,Boolean.TRUE);
-//    }
 
-
-    //TODO 废弃
     /**
      * 返回两个主机在链表中的距离
      * */
@@ -335,7 +352,10 @@ public class Membership {
         if (dist < 0) dist += members.size();
         return dist;
     }
+    
 
+
+    //TODO 废弃
 
     //TODO  判断是链尾 后链的同时下一个元素是leader才是链尾
     // other 是下一个节点
@@ -381,12 +401,16 @@ public class Membership {
         return members.get(pos);
     }
     
-
+    
+    //有使用
+    //在tryTakeLeadership()中发送prepareMsg给其他节点
+    //可能返回断开的节点
     public List<Host> getMembers() {
         return Collections.unmodifiableList(members);
     }
 
     
+    //返回系统中节点的数量 在在tryTakeLeadership()方法中使用
     public int size() {
         return members.size();
     }

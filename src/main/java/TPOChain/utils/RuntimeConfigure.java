@@ -4,7 +4,8 @@ package TPOChain.utils;
 //每个
 public class RuntimeConfigure {
     public RuntimeConfigure(){}
-    //各个command leader进行命令的分发
+    
+    //记录各个command leader进行命令的分发的序号
     //某个节点在故障恢复后，又成为新的前链节点，那前链节点使用这个
     //其他节点不使用用这个
     public int lastAcceptSent = -1;
@@ -17,9 +18,9 @@ public class RuntimeConfigure {
     public int highestAcknowledgedInstance = -1;
     
     
-    //TODO：这个参数不需要吧:因为这个类主要在
-    /**
-     * 标记每个节点的accptCl
-     * */
-    public int   acceptedupcl=-1;
+//    //这个参数不需要吧:因为这个类主要在
+//    /**
+//     * 标记每个节点的accptCl
+//     * */
+//    public int   acceptedupcl=-1;
 }
