@@ -339,7 +339,33 @@ public class Membership {
         assert remove;
     }
 
-
+    
+    
+    
+    /**
+     * 返回竞选者和旧leader在链表中的距离
+     * */
+    public int distanceFrontFrom(Host current, Host initial) {
+        assert contains(current) && contains(initial);
+        
+        //调用参数
+        //membership.distanceFrontFrom(self, supportedLeader()) <= QUORUM_SIZE/2 +1
+        //TODO 生成一个前链节点的备份List
+        List<Host> frontChain=new ArrayList<>();
+        for (Host temp: members) {
+            if (frontedChainNode.get(temp).equals(Boolean.TRUE)){
+                frontChain.add(temp);
+            }
+        }
+        //TODO  在新leader故障后，与新leader有过交换位置。
+        int currentIndex =frontChain.indexOf(current); 
+        int initialIndex =frontChain.indexOf(initial);  
+        int dist = currentIndex - initialIndex;
+        if (dist < 0) dist += frontChain.size();
+        return dist;
+    }
+    
+    
     /**
      * 返回两个主机在链表中的距离
      * */

@@ -467,15 +467,32 @@ public class TPOChainProto extends GenericProtocol {
 
         //标记为前段节点
         amFrontedNode = true;
+
+        //对下一个消息节点进行重设
+        nextOkFront =membership.nextLivingInFrontedChain(self);
+        nextOkBack=membership.nextLivingInBackChain(self);
     }
     
+    //TODO 失去前链节点
+    private  void  cancelfrontChainNodeAction(){
+        //取消拥有了设置选举leader的资格
+        //取消设置领导超时处理
+        cancelTimer(leaderTimeoutTimer)   ;
+        lastLeaderOp = System.currentTimeMillis();
+        //标记为前段节点
+        amFrontedNode = false;
+    }
+    
+    
+    //TODO  抑制一些候选举leader的情况：只有在与leader相聚(F+1)/2 +1
+    //TODO 有问题：在leader故障时，leader与后链首节点交换了位置
     //TODO 有问题：除了初始情况下supportedLeader()=null;正常超时怎么解决
     /**
      * 在leadertimer超时争取当leader
      */
     private void onLeaderTimer(LeaderTimer timer, long timerId) {
         if (!amQuorumLeader && (System.currentTimeMillis() - lastLeaderOp > LEADER_TIMEOUT) &&
-                (supportedLeader() == null //初始为空
+                (supportedLeader() == null //初始为空  ，或新加入节点
                         /**
                          * 不需要，避免加入节点在链的前半部分结束并减慢一切。只有在节点加入时领导者选举才会发生。
                          * */
@@ -483,7 +500,7 @@ public class TPOChainProto extends GenericProtocol {
                         // the chain and slowing everything down. Only would happen with leader
                         // election simultaneous with nodes joining.
                         
-                         ||  membership.distanceFrom(self, supportedLeader()) <= membership.size() - QUORUM_SIZE
+                         ||  membership.distanceFrom(self, supportedLeader()) <= 2*QUORUM_SIZE
                         )) {
             tryTakeLeadership();
         }
@@ -503,6 +520,7 @@ public class TPOChainProto extends GenericProtocol {
         //private Map.Entry<Integer, SeqN> currentSN是
         //currentSN初始值是new AbstractMap.SimpleEntry<>(-1, new SeqN(-1, null));
         SeqN newSeqN = new SeqN(currentSN.getValue().getCounter() + 1, self);
+        
         instance.prepareResponses.put(newSeqN, new HashSet<>());
         PrepareMsg pMsg = new PrepareMsg(instance.iN, newSeqN);
         membership.getMembers().forEach(h -> sendOrEnqueue(pMsg, h));
@@ -525,7 +543,7 @@ public class TPOChainProto extends GenericProtocol {
             sendMessage(new UnaffiliatedMsg(), from, TCPChannel.CONNECTION_IN);
             return;
         }
-
+        
         if (msg.iN > highestAcknowledgedInstanceCl) {
             // currentSN消息是private Map.Entry<Integer, SeqN> currentSN;
             assert msg.iN >= currentSN.getKey();
@@ -552,14 +570,15 @@ public class TPOChainProto extends GenericProtocol {
             logger.info("Responding with decided");
             List<AcceptedValue> values = new ArrayList<>(highestDecidedInstanceCl - msg.iN + 1);
             for (int i = msg.iN; i <= highestDecidedInstanceCl; i++) {
-                InstanceState decidedInstance = globalinstances.get(i);
+                InstanceStateCL decidedInstance = globalinstances.get(i);
                 assert decidedInstance.isDecided();
                 values.add(new AcceptedValue(i, decidedInstance.highestAccept, decidedInstance.acceptedValue));
             }
-            sendOrEnqueue(new DecidedMsg(msg.iN, msg.sN, values), from);
+            sendOrEnqueue(new DecidedCLMsg(msg.iN, msg.sN, values), from);
         }
     }
 
+    
     /**
      *  logger.info("New highest instance leader: iN:" + iN + ", " + sN);
      * */
@@ -1252,6 +1271,9 @@ public class TPOChainProto extends GenericProtocol {
     }
     
     
+    
+    //TODO 一个命令可以回复客户端，只有在它以及它之前所有实例被ack时，才能回复客户端
+    
     //TODO 执行命令,需要确保当一个命令执行时，它之前的命令必须已经执行  
     // 所以不是同步的，所以有时候可能
     private void execute(){
@@ -1261,8 +1283,7 @@ public class TPOChainProto extends GenericProtocol {
     }
 
 
-    //TODO 设置一个时钟，后链首节点定时申请成为前链节点
-    // 当当选成功时
+
     
     
     
@@ -1272,6 +1293,15 @@ public class TPOChainProto extends GenericProtocol {
     
     
     
+    
+    
+    
+    
+    
+    //TODO  新加入的currentSN怎么解决，会不会触发leader的选举
+    //  应该不会，不是前链节点 
+    // 那原协议，怎么解决：
+    //
 
     //请求加入集群的客户端方法
 
