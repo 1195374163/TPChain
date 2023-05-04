@@ -45,14 +45,19 @@ public class Membership {
         this.MIN_QUORUM_SIZE = MIN_QUORUM_SIZE;
         members = new ArrayList<>(initial);
         indexMap = new HashMap<>();
-        
+        // 初始时，对前链节点进行初始化，以顺序作为默认条件，前F+1个节点为
+        // 前链节点
         frontedChainNode = new HashMap<>();
         int i=0;
         for (Host temp : initial) {
             if(i<MIN_QUORUM_SIZE){//为前链
-                frontedChainNode.put(temp,Boolean.TRUE);
+                //frontedChainNode.put(temp,Boolean.TRUE); 
+                //上面这句代码等价于下面这句代码
+                setFrontChainNode(temp);
             }else{//为后链
-                frontedChainNode.put(temp,Boolean.FALSE);
+                //frontedChainNode.put(temp,Boolean.FALSE);
+                //上面这句代码等价于下面这句代码
+                cancelFrontChainNode(temp);
             }
             i++;
         }
@@ -74,7 +79,7 @@ public class Membership {
         checkSizeAgainstMaxFailures();
     }
     
-    
+    //TODO 新加入节点根据拿来的消息进行初始话自己的集群列表
     //新加入节点根据状态进行对集群全部节点以及节点的状态的恢复
     public  Membership(Pair<List<Host>, Map<Host,Boolean>> mem,int MIN_QUORUM_SIZE){
         this.MIN_QUORUM_SIZE = MIN_QUORUM_SIZE;
@@ -136,12 +141,19 @@ public class Membership {
     
     
     
-    //分发过程需要这些字段
+
+    //后链的下一个节点为空
+    
     /**
      * 返回当前节点在前段链的下一个存活节点s
      * */
     public Host nextLivingInFrontedChain(Host myHost) {
         assert contains(myHost);
+        
+        //当 当前节点为后链节点时返回null
+        if (frontedChainNode.get(myHost).equals(Boolean.FALSE)){
+            return null;
+        }
         
         int nextIndex = (indexOf(myHost) + 1) % members.size();
         Host nextHost = members.get(nextIndex);
@@ -153,6 +165,7 @@ public class Membership {
         return nextHost;
     }
     
+    //若是前链节点的话，它的后链节点就是后链首节点
     
     /**
      * 返回当前节点在后段链的下一个存活节点s
@@ -160,13 +173,13 @@ public class Membership {
     public Host nextLivingInBackChain(Host myHost) {
         assert contains(myHost);
         
-        //特殊判定
-        //如果是前链节点，后链的首节点一定是它的nextBackChainNode
+       
+        //特殊判定：如果是前链节点，后链的首节点一定是它的nextBackChainNode
         if (frontedChainNode.get(myHost).equals(Boolean.TRUE)){
             return getBackChainHead();
         }
-        //后面是后链节点的流程
         
+        //后面是后链节点的流程
         int nextIndex = (indexOf(myHost) + 1) % members.size();
         Host nextHost = members.get(nextIndex);
         //当是 前链 或者  标记节点中包括此节点 ，下一次循环
@@ -177,9 +190,11 @@ public class Membership {
         return nextHost;
     }
 
-
+    
+    //TODO 需要修改 因为前链和后链
     //通用 ：对前链节点和后链:根据目标Host的类型，也返回中间的一些节点
     //哪怕中间有节点属于pendingRemove，也会向其发送消息
+    
     /**
      * 返回的从当前节点(不包括当前节点)到目标节点(包括目标节点)的所有节点的Iterator
      * */
@@ -267,8 +282,12 @@ public class Membership {
         frontedChainNode.put(me,Boolean.TRUE);
     }
 
-
-
+    /**
+     * 取消某个节点前链节点标志位即设置它为后链节点
+     * */
+    public void cancelFrontChainNode(Host me){
+        frontedChainNode.put(me,Boolean.FALSE);
+    }
 
     
     /**
@@ -334,9 +353,11 @@ public class Membership {
     }
     
     
+    //TODO  这里还需要重新考虑：
+    // 将void 改成Host，返回受影响的节点，对其进行前链节点进行frontChainNodeAction()方法
+    
     
     //在对于新加入节点时，可能需要这些操作
-    
     //在接收一些删除节点操作的实例时，先进行可能移除
     //在删除操作时，先进行标记，后进行删除
     //若删除的是前链节点，需要将后链首节点与要删除的节点互换位置
@@ -358,6 +379,7 @@ public class Membership {
         }else{//删除的是后链节点
             //不处理
         }
+        
         //不管是前链还是后链，都要将
         boolean add = pendingRemoval.add(affectedHost);
         assert add;
@@ -369,8 +391,7 @@ public class Membership {
     }
 
     
-    
-    
+    //TODO 废弃
     /**
      * 返回竞选者和旧leader在链表中的距离
      * */
@@ -411,8 +432,7 @@ public class Membership {
 
 
     //TODO 废弃
-
-    //TODO  判断是链尾 后链的同时下一个元素是leader才是链尾
+    // 判断是链尾 后链的同时下一个元素是leader才是链尾
     // other 是下一个节点
     /**
      * 判断后链的节点是否是链中的最后的节点
@@ -451,7 +471,6 @@ public class Membership {
 
 
     
-    
     public Host nodeAt(int pos){
         return members.get(pos);
     }
@@ -478,8 +497,7 @@ public class Membership {
                 '}';
     }
     
-
-    //进行浅层拷贝
+    
     //这里不需要改变，因为调用这个方法的是刚加入节点向全体广播 joinsuccessMsg,用这个方法
     //得到全体成员
     public List<Host> shallowCopy() {
@@ -487,7 +505,7 @@ public class Membership {
     }
     
     
-    // Map<Host,Boolean> frontedChainNode;
+    //TODO 对于要删除节点是否也要复制
     //对新加入节点的对集群的节点信息以及前链节点进行拷贝
     public Pair<List<Host>,Map<Host,Boolean>> deepCopy(){
         return new MutablePair<>(new ArrayList<>(members),new HashMap<>(frontedChainNode));

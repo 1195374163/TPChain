@@ -22,8 +22,6 @@ public abstract class PaxosValue {
         SORT(3,SortValue.serializer);
         
         
-        
-        
         public final int opcode;
         private final ValueSerializer<PaxosValue> serializer;
 
@@ -32,7 +30,6 @@ public abstract class PaxosValue {
             this.serializer = serializer;
         }
 
-        
         
         
         /**

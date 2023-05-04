@@ -429,7 +429,6 @@ public class TPOChainProto extends GenericProtocol {
 
         logger.info("TPOChainProto: " + membership + " qs " + QUORUM_SIZE);
     }
-
     
 
     /**
@@ -441,7 +440,7 @@ public class TPOChainProto extends GenericProtocol {
         membership = new Membership(members, QUORUM_SIZE);
         
         //nextOkCl = membership.nextLivingInChain(self);
-        //TODO 对排序的下一个节点准备，打算在这里
+        // 对排序的下一个节点准备，打算在这里
         nextOkFront =membership.nextLivingInFrontedChain(self);
         nextOkBack=membership.nextLivingInBackChain(self);
         //next
@@ -464,15 +463,37 @@ public class TPOChainProto extends GenericProtocol {
         //当判断当前节点是否为前链节点
         if(membership.isFrontChainNode(self).equals(Boolean.TRUE)){
             frontChainNodeAction();
+        } else {//成为后链节点
         }
-        else {//成为后链节点
-            
-        }
-//        //设置领导超时处理
-//        leaderTimeoutTimer = setupPeriodicTimer(LeaderTimer.instance, LEADER_TIMEOUT, LEADER_TIMEOUT / 3);
-//        lastLeaderOp = System.currentTimeMillis();
     }
+    
+    
+    //TODO 当一个前链节点被删除时，后链首节点也要执行这个操作
+    
+    
+    
+    // TODO  当一个前链节点，被标记失去前链节点那么要取消时钟
+    
+    
+    
+    
+    /**
+     *前链节点执行的pre操作
+    */
+    private  void  frontChainNodeAction(){
+        //拥有了设置选举leader的资格
+        //设置领导超时处理
+        leaderTimeoutTimer = setupPeriodicTimer(LeaderTimer.instance, LEADER_TIMEOUT, LEADER_TIMEOUT / 3);
+        lastLeaderOp = System.currentTimeMillis();
 
+        //标记为前段节点
+        amFrontedNode = true;
+
+        //对下一个消息节点进行重设 
+        nextOkFront =membership.nextLivingInFrontedChain(self);
+        nextOkBack=membership.nextLivingInBackChain(self);
+    }
+    
     
     //TODO  新加入节点对系统中各个分发节点也做备份
     /**
@@ -482,18 +503,18 @@ public class TPOChainProto extends GenericProtocol {
         //传进来的参数setupInitialState(seeds, -1);
         //这里根据传进来的顺序， 已经将前链节点和后链节点分清楚出了
         membership = new Membership(members, QUORUM_SIZE);
-        // TODO 废弃nextokcl是排序
-        nextOkCl = membership.nextLivingInChain(self);
-        //TODO 对排序的下一个节点准备，打算在这里
+
+        //nextOkCl = membership.nextLivingInChain(self);
+        // 对排序的下一个节点准备，打算在这里
         nextOkFront =membership.nextLivingInFrontedChain(self);
         nextOkBack=membership.nextLivingInBackChain(self);
         //next
-        members.getLeft().stream().filter(h -> !h.equals(self)).forEach(this::openConnection);
+        members.stream().filter(h -> !h.equals(self)).forEach(this::openConnection);
         //对全局的排序消息进行配置  -1
         joiningInstanceCl = highestAcceptedInstanceCL = highestAcknowledgedInstanceCl = highestDecidedInstanceCl =
                 instanceNumber;// instanceNumber初始为-1
         //对命令分发进行初始化配置
-        for (Host temp:members.getLeft()) {
+        for (Host temp:members) {
             //对分发的配置进行初始化  hostConfigureMap
             //  Map<Host,RuntimeConfigure>
             RuntimeConfigure runtimeConfigure=new RuntimeConfigure();
@@ -507,41 +528,25 @@ public class TPOChainProto extends GenericProtocol {
         //当判断当前节点是否为前链节点
         if(membership.isFrontChainNode(self).equals(Boolean.TRUE)){
             frontChainNodeAction();
+        } else {//成为后链节点
         }
-        else {//成为后链节点
-
-        }
-//        //设置领导超时处理
-//        leaderTimeoutTimer = setupPeriodicTimer(LeaderTimer.instance, LEADER_TIMEOUT, LEADER_TIMEOUT / 3);
-//        lastLeaderOp = System.currentTimeMillis();
-    }
-    //TODO 考虑 ：
-    // 节点不仅可能出现故障，可能出现节点良好但网络延迟造成的相似故障，需要考虑这个
-    
-    //TODO  考虑删除节点
-    // 在删除节点时 leader故障
-    // 在删除节点时 它又新加入集群
-    
-    //前链节点执行的pre操作
-    private  void  frontChainNodeAction(){
-        //拥有了设置选举leader的资格
-        //设置领导超时处理
-        leaderTimeoutTimer = setupPeriodicTimer(LeaderTimer.instance, LEADER_TIMEOUT, LEADER_TIMEOUT / 3);
-        lastLeaderOp = System.currentTimeMillis();
-
-        //标记为前段节点
-        amFrontedNode = true;
-
-        //对下一个消息节点进行重设
-        nextOkFront =membership.nextLivingInFrontedChain(self);
-        nextOkBack=membership.nextLivingInBackChain(self);
     }
     
     
     
-    //TODO  抑制一些候选举leader的情况：只有在与leader相聚(F+1)/2 +1
-    //TODO 有问题：在leader故障时，leader与后链首节点交换了位置
-    //TODO 有问题：除了初始情况下supportedLeader()=null;正常超时怎么解决
+    //TODO 考虑 ： 节点不仅可能出现故障，可能出现节点良好但网络延迟造成的相似故障，需要考虑这个
+    
+    
+    //TODO  考虑删除节点  在删除节点时，leader故障   在删除节点时，它又新加入集群
+    
+    
+
+    
+    
+    //  抑制一些候选举leader的情况：只有在与leader相聚(F+1)/2 +1
+    // 有问题：在leader故障时，leader与后链首节点交换了位置
+    // 除了初始情况下supportedLeader()=null;正常超时怎么解决
+    // 对上面情况做出解答： 所有节点都可以竞选新leader
     /**
      * 在leadertimer超时争取当leader
      */
@@ -557,6 +562,7 @@ public class TPOChainProto extends GenericProtocol {
             tryTakeLeadership();
         }
     }
+    
     
 
     /**
@@ -575,18 +581,15 @@ public class TPOChainProto extends GenericProtocol {
         SeqN newSeqN = new SeqN(currentSN.getValue().getCounter() + 1, self);
         instance.prepareResponses.put(newSeqN, new HashSet<>());
         
+        
         PrepareMsg pMsg = new PrepareMsg(instance.iN, newSeqN);
         membership.getMembers().forEach(h -> sendOrEnqueue(pMsg, h));
     }
+
     
-    //TODO 对于各种消息，若收到不来自自己集群的消息，可以让其重新加入集群
-    private  void  verifyMsgSource(Host from) {
-        if (!membership.contains(from)) {
-            logger.warn("Received msg from unaffiliated host " + from);
-            sendMessage(new UnaffiliatedMsg(), from, TCPChannel.CONNECTION_IN);
-            return;
-        }
-    }
+    //TODO 当一个前链节点故障时，要对其转发的command进行重新转发，可以由新leader收集并，保证局部日志不为空，否则全局日志有
+    // 而局部日志没有，导致系统进行不下去
+    
     
     /**
      * 处理PrepareMsg消息
@@ -595,7 +598,6 @@ public class TPOChainProto extends GenericProtocol {
      * logger.info(msg + " 来自: " + from);
      * */
     private void uponPrepareMsg(PrepareMsg msg, Host from, short sourceProto, int channel) {
-
         //若集群没有它这个节点，发送其UnaffiliatedMsg，让其重新加入集群
         //logger.debug(msg + " : " + from);
         logger.info(msg + " 来自: " + from);
@@ -604,7 +606,7 @@ public class TPOChainProto extends GenericProtocol {
             sendMessage(new UnaffiliatedMsg(), from, TCPChannel.CONNECTION_IN);
             return;
         }
-        //正常流程到这
+        
         if (msg.iN > highestAcknowledgedInstanceCl) {
             // currentSN消息是private Map.Entry<Integer, SeqN> currentSN;
             assert msg.iN >= currentSN.getKey();
@@ -614,15 +616,15 @@ public class TPOChainProto extends GenericProtocol {
                 setNewInstanceLeader(msg.iN, msg.sN);//此函数已经选择 此msg为支持的领导
 
                 //Gather list of accepts (if they exist)
-                List<AcceptedValue> values = new ArrayList<>(Math.max(highestAcceptedInstanceCL - msg.iN + 1, 0));
+                List<AcceptedValueCL> values = new ArrayList<>(Math.max(highestAcceptedInstanceCL - msg.iN + 1, 0));
                 for (int i = msg.iN; i <= highestAcceptedInstanceCL; i++) {
-                    InstanceState acceptedInstance = globalinstances.get(i);
+                    InstanceStateCL acceptedInstance = globalinstances.get(i);
                     assert acceptedInstance.acceptedValue != null && acceptedInstance.highestAccept != null;
-                    values.add(new AcceptedValue(i, acceptedInstance.highestAccept, acceptedInstance.acceptedValue));
+                    values.add(new AcceptedValueCL(i, acceptedInstance.highestAccept, acceptedInstance.acceptedValue));
                 }
                 sendOrEnqueue(new PrepareOkMsg(msg.iN, msg.sN, values), from);
                 lastLeaderOp = System.currentTimeMillis();
-            } else//当msg的SN小于等于  // 否则丢弃
+            } else//当msg的SN小于等于当前leader标记，丢弃
                 logger.warn("Discarding prepare since sN <= hP");
         } else { //Respond with decided message  主要对于系统中信息滞后的节点进行更新
             /*
@@ -655,10 +657,14 @@ public class TPOChainProto extends GenericProtocol {
         if (amQuorumLeader && !sN.getNode().equals(self)) {
             amQuorumLeader = false;
             cancelTimer(noOpTimerCL);
-
+            
             waitingAppOps.clear();
             waitingMembershipOps.clear();
         }
+        //不为leader的就更新个leader的标志SN
+        
+        
+        //下面是改变前面协议对leader的指向
         triggerMembershipChangeNotification();
     }
 
@@ -671,25 +677,33 @@ public class TPOChainProto extends GenericProtocol {
                 null, supportedLeader().getAddress(), null));
     }
     
-    //TODO  废弃掉这个，重写接收到decided消息
+    
+    //TODO  废弃掉这个
     /**
      * 收到Decided信息
      */
     private void uponDecidedMsg(DecidedMsg msg, Host from, short sourceProto, int channel) {
         logger.debug(msg + " from:" + from);
-        InstanceState instance = globalinstances.get(msg.iN);
+
+        InstanceStateCL instance = globalinstances.get(msg.iN);
         //在实例被垃圾收集  或    msg的实例小于此节点的Decide   或    现在的leader大于msg的leader
         if (instance == null || msg.iN <= highestDecidedInstanceCl || currentSN.getValue().greaterThan(msg.sN)) {
             logger.warn("Late decided... ignoring");
             return;
         }
-        //若存在的话，
+        //下面的代码对应序号实例若存在的话
+
+
+        //这个说明此节点在系统中属于落后状态，之前的选举leader先废弃
         instance.prepareResponses.remove(msg.sN);
+
+
         //Update decided values
-        for (AcceptedValue decidedValue : msg.decidedValues) {
-            InstanceState decidedInst = globalinstances.computeIfAbsent(decidedValue.instance, InstanceState::new);
+        for (AcceptedValueCL decidedValue : msg.decidedValues) {
+            InstanceStateCL decidedInst = globalinstances.computeIfAbsent(decidedValue.instance, InstanceStateCL::new);
             logger.debug("Deciding:" + decidedValue + ", have: " + instance);
             decidedInst.forceAccept(decidedValue.sN, decidedValue.value);
+
             //Make sure there are no gaps between instances
             assert instance.iN <= highestAcceptedInstanceCL + 1;
             if (instance.iN > highestAcceptedInstanceCL) {
@@ -699,22 +713,79 @@ public class TPOChainProto extends GenericProtocol {
             if (!decidedInst.isDecided())
                 decideAndExecute(decidedInst);
         }
+
         //No-one tried to be leader after me, trying again
         //若leader还是没有变化，还是重试，此处在更新节点的信息之后，结果可能不一样
+        //当  当前的leader和之前发送的一样重新进行选举
         if (currentSN.getValue().equals(msg.sN))
             tryTakeLeadership();
     }
 
-    //TODO 对排序信息进行处理
-    private void uponDecidedCLMsg(DecidedCLMsg protoMessage, Host from, short sourceProto, int channel) {
+    
+    //此节点落后于其他节点，对排序信息进行处理
+    /**
+     * 收到DecidedCLMsg
+     */
+    private void uponDecidedCLMsg(DecidedCLMsg msg, Host from, short sourceProto, int channel) {
+        logger.debug(msg + " from:" + from);
+        
+        InstanceStateCL instance = globalinstances.get(msg.iN);
+        //在实例被垃圾收集  或    msg的实例小于此节点的Decide   或    现在的leader大于msg的leader
+        if (instance == null || msg.iN <= highestDecidedInstanceCl || currentSN.getValue().greaterThan(msg.sN)) {
+            logger.warn("Late decided... ignoring");
+            return;
+        }
+        //下面的代码对应序号实例若存在的话
+        
+        
+        //这个说明此节点在系统中属于落后状态，之前的选举leader先废弃
+        instance.prepareResponses.remove(msg.sN);
+        
+        
+        //Update decided values
+        for (AcceptedValueCL decidedValue : msg.decidedValues) {
+            InstanceStateCL decidedInst = globalinstances.computeIfAbsent(decidedValue.instance, InstanceStateCL::new);
+            logger.debug("Deciding:" + decidedValue + ", have: " + instance);
+            decidedInst.forceAccept(decidedValue.sN, decidedValue.value);
+            
+            //Make sure there are no gaps between instances
+            assert instance.iN <= highestAcceptedInstanceCL + 1;
+            if (instance.iN > highestAcceptedInstanceCL) {
+                highestAcceptedInstanceCL++;
+                assert instance.iN == highestAcceptedInstanceCL;
+            }
+            if (!decidedInst.isDecided())
+                decideAndExecute(decidedInst);
+        }
+        
+        //No-one tried to be leader after me, trying again
+        //若leader还是没有变化，还是重试，此处在更新节点的信息之后，结果可能不一样
+        //当  当前的leader和之前发送的一样重新进行选举
+        // 意思即为：还是没有新节点发送prepare
+        if (currentSN.getValue().equals(msg.sN))
+            tryTakeLeadership();
     }
+
+    // Notice 
+    /**
+     *  一种情况是：
+     *  当一个处于中间节点状态的节点向比它先进的节点  或  落后节点发送prepare消息，先进节点回复
+     *  decideCLMsg，落后节点回复  prepareoK消息，怎么处理
+     * */
+    
+    
+    // Notice 
+    /**
+     *  对prepareokMsg来的消息进行学习
+     * 
+     * */
     
     
     /**
      *接收PrepareOkMsg消息
      * */
     private void uponPrepareOkMsg(PrepareOkMsg msg, Host from, short sourceProto, int channel) {
-        InstanceState instance = globalinstances.get(msg.iN);
+        InstanceStateCL instance = globalinstances.get(msg.iN);
         logger.debug(msg + " from:" + from);
         //在实例被垃圾收集  或   已经进行更高的ack  或   现在的leader比msg中的leader更大时
         if (instance == null || msg.iN <= highestAcknowledgedInstanceCl || currentSN.getValue().greaterThan(msg.sN)) {
@@ -731,8 +802,8 @@ public class TPOChainProto extends GenericProtocol {
         okHosts.add(from);
 
         //Update possible accepted values
-        for (AcceptedValue acceptedValue : msg.acceptedValues) {
-            InstanceState acceptedInstance = globalinstances.computeIfAbsent(acceptedValue.instance, InstanceState::new);
+        for (AcceptedValueCL acceptedValue : msg.acceptedValueCLS) {
+            InstanceStateCL acceptedInstance = globalinstances.computeIfAbsent(acceptedValue.instance, InstanceStateCL::new);
             //acceptedInstance的SeqN highestAccept属性;
 
             //  候选者的别的实例为空   或   新实例的term大于存在的实例的term
@@ -749,27 +820,45 @@ public class TPOChainProto extends GenericProtocol {
                     assert acceptedInstance.iN == highestAcceptedInstanceCL;
                 }
             }else {//不需要管
+                //到达这里 表明这个节点已经有了对应的实例，且那个实例的leader term大于
+                // 消息中的term
             }
         }
 
+        //Notice
+        /**
+         * 最坏的情况下：
+         * 若每次都有新的节点打破原来的prepareok的消息，那最后Host的IP地址最大将是leader
+         * **/
 
         //TODO maybe only need the second argument of max?
-        if (okHosts.size() == Math.max(QUORUM_SIZE, membership.size() - QUORUM_SIZE + 1)) {
-            //清空答复
+        //if (okHosts.size() == Math.max(QUORUM_SIZE, membership.size() - QUORUM_SIZE + 1)) {
+        // 当回复prepareok的节点达到系统的大多数
+        if (okHosts.size() ==QUORUM_SIZE) {
+            //已经准备好了，清空答复
             instance.prepareResponses.remove(msg.sN);
+            
             assert currentSN.getValue().equals(msg.sN);
             assert supportedLeader().equals(self);
             //开始成为leader
             becomeLeader(msg.iN);
         }
     }
-
+    
+    //TODO 在
+    
+    
+    
+    
+    
     /**
      * I am leader now! @ instance
      * */
     private void becomeLeader(int instanceNumber) {
         amQuorumLeader = true;
         noOpTimerCL = setupPeriodicTimer(NoOpTimer.instance, NOOP_SEND_INTERVAL, Math.max(NOOP_SEND_INTERVAL / 3,1));
+        
+        
         logger.info("I am leader now! @ instance " + instanceNumber);
 
         /**
@@ -777,20 +866,23 @@ public class TPOChainProto extends GenericProtocol {
          * */
         for (int i = instanceNumber; i <= highestAcceptedInstanceCL; i++) {
             if (logger.isDebugEnabled()) logger.debug("Propagating received operations: " + i);
-            InstanceState aI = globalinstances.get(i);
+            
+            InstanceStateCL aI = globalinstances.get(i);
+            
             assert aI.acceptedValue != null;
             assert aI.highestAccept != null;
             //goes to the end of the queue
-            this.deliverMessageIn(new MessageInEvent(new BabelMessage(new AcceptMsg(i, currentSN.getValue(), (short) 0,
+            this.deliverMessageIn(new MessageInEvent(new BabelMessage(new AcceptCLMsg(i, currentSN.getValue(), (short) 0,
                     aI.acceptedValue, highestAcknowledgedInstanceCl), (short)-1, (short)-1), self, peerChannel));
         }
 
         //标记leader发送到下一个节点到哪了
         lastAcceptSentCl = highestAcceptedInstanceCL;
 
+        
         /**
          * 对集群中不能连接的节点进行删除
-         * */
+         */
         membership.getMembers().forEach(h -> {
             if (!h.equals(self) && !establishedConnections.contains(h)) {
                 logger.info("Will propose remove " + h);
@@ -798,16 +890,12 @@ public class TPOChainProto extends GenericProtocol {
                         self, getProtoId(), peerChannel);
             }
         });
-
+            
         lastAcceptTimeCl = 0;
 
-
-
-
-        /**
-         * 对于暂存一些消息可以不做
-         * */
-
+        
+        
+        
         /**
          * 对咱暂存在成员操作和App操作进行发送
          * */
@@ -898,9 +986,9 @@ public class TPOChainProto extends GenericProtocol {
     
 /**------leader的重新发送排序命令，也可以包括成员添加，删除操作--**/
 
-    /**
-     * leader负责接收其他前链节点发过来的请求排序消息
-     * */
+    
+     //leader负责接收其他前链节点发过来的请求排序消息
+     
     /**
      * 处理OrderMsg信息
      */
@@ -910,13 +998,15 @@ public class TPOChainProto extends GenericProtocol {
         }else {
         }
     }
+    
+    // leader接收来自前段的消息准备发送到 
     /**
      * 生成排序消息发给
      * **/
     private void sendNextAcceptCL(PaxosValue val) {
         assert supportedLeader().equals(self) && amQuorumLeader;
-
-        InstanceState instance = globalinstances.computeIfAbsent(lastAcceptSentCl + 1, InstanceState::new);
+        
+        InstanceStateCL instance = globalinstances.computeIfAbsent(lastAcceptSentCl + 1, InstanceStateCL::new);
         assert instance.acceptedValue == null && instance.highestAccept == null;
 
         PaxosValue nextValue;
@@ -947,7 +1037,65 @@ public class TPOChainProto extends GenericProtocol {
         lastAcceptTimeCl = System.currentTimeMillis();
     }
     
-    private void uponAcceptCLMsg(AcceptCLMsg protoMessage, Host from, short sourceProto, int channel) {
+    
+    //上面那两个方法是
+    
+
+    private void uponAcceptCLMsg(AcceptCLMsg msg, Host from, short sourceProto, int channel) {
+        //对不在系统中的节点发送未定义消息让其重新加入系统
+        if(!membership.contains(from)){
+            logger.warn("Received msg from unaffiliated host " + from);
+            sendMessage(new UnaffiliatedMsg(), from, TCPChannel.CONNECTION_IN);
+            return;
+        }
+
+        InstanceStateCL instance = globalinstances.computeIfAbsent(msg.iN, InstanceStateCL::new);
+        
+        //"Discarding decided msg" 
+        //若 消息已经decide，且msg的leader term等于实例的leader term
+        if (instance.isDecided() && msg.sN.equals(instance.highestAccept)) {
+            logger.warn("Discarding decided msg");
+            return;
+        }
+
+        if (msg.sN.lesserThan(currentSN.getValue())) {
+            //logger.warn("Discarding accept since sN < hP: " + msg);
+            return;
+        }//之后新消息msg.SN大于等于现在的SN
+
+        //设置msg.sN.getNode()为新支持的leader
+        if (msg.sN.greaterThan(currentSN.getValue()))
+            setNewInstanceLeader(msg.iN, msg.sN);
+        //
+        if (msg.sN.equals(instance.highestAccept) && (msg.nodeCounter <= instance.counter)) {
+            logger.warn("Discarding since same sN & leader, while counter <=");
+            return;
+        }
+
+        lastLeaderOp = System.currentTimeMillis();//进行更新领导操作时间
+
+        assert msg.sN.equals(currentSN.getValue());
+
+        //在这里可能取消了删除节点，后续真的删除节点时也在后面的mark中重新加入节点
+        maybeCancelPendingRemoval(instance.acceptedValue);
+        instance.accept(msg.sN, msg.value, (short) (msg.nodeCounter + 1));//进行对实例的确定
+
+        //更新highestAcceptedInstance信息
+        if (highestAcceptedInstanceCL < instance.iN) {
+            highestAcceptedInstanceCL++;
+            assert highestAcceptedInstanceCL == instance.iN;
+        }
+
+        if ((instance.acceptedValue.type == PaxosValue.Type.MEMBERSHIP) &&
+                (((MembershipOp) instance.acceptedValue).opType == MembershipOp.OpType.REMOVE))
+            markForRemoval(instance);//删除节点
+
+        forward(instance);//转发下一个节点
+
+        if (!instance.isDecided() && instance.counter >= QUORUM_SIZE) //We have quorum!
+            decideAndExecute(instance);//决定并执行实例
+
+        ackInstance(msg.ack);//对于之前的实例进行ack并进行垃圾收集
     }
     /**
      * 转发accept信息给下一个节点
@@ -1259,7 +1407,7 @@ public class TPOChainProto extends GenericProtocol {
     /**
      * decide并执行Execute实例
      * */
-    private void decideAndExecute(InstanceState instance) {
+    private void decideAndExecute(InstanceStateCL instance) {
         assert highestDecidedInstanceCl == instance.iN - 1;
         assert !instance.isDecided();
         
