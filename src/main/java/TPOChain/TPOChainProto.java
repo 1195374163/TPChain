@@ -61,7 +61,15 @@ public class TPOChainProto extends GenericProtocol {
     private final int QUORUM_SIZE;
     private final int RECONNECT_TIME;
 
-
+    //  对各项超时的依赖关系：
+    // 如  noOp_sended_timeout  leader_timeout  reconnect_timeout
+    /**
+     * leader_timeout=5000
+     * noop_interval=100
+     * join_timeout=3000
+     * state_transfer_timeout=5000
+     * reconnect_time=1000
+     * */
 
     
     //TODO 打算废弃
@@ -88,9 +96,10 @@ public class TPOChainProto extends GenericProtocol {
 
     
     //TODO 废弃，使用下面那两个进行转发消息
-    private Host nextOkCl;
+    //private Host nextOkCl;
    
-    //排序消息和分发消息都是同一个消息通道，关键是能否正确的传达到下一个节点
+    //对于leader的排序消息和分发消息都是同一个消息通道，
+    // 关键是能否正确的传达到下一个节点
     
     /**
      * 排序消息的下一个节点
@@ -135,11 +144,14 @@ public class TPOChainProto extends GenericProtocol {
      * 保持leader的心跳信息，用系统当前时间减去上次时间
      * */
     private long lastAcceptTimeCl;
-
+    
+    // 还有一个field ： System.currentTimeMillis(); 隐含了系统的当前时间
+    
     
     
     /**
-     *计时 与leader之间的呼吸
+     *计时 非leader计算与leader之间的呼吸
+     * 只有前链节点有
      * */
     //多长时间没接收到leader消息
     //前链节点闹钟----计时与leader之间的上一次的通信时间
@@ -147,7 +159,10 @@ public class TPOChainProto extends GenericProtocol {
     //在每个节点标记上次leader命令的时间
     private long lastLeaderOp;
 
+    // 还有一个field ： System.currentTimeMillis(); 隐含了系统的当前时间
 
+    
+    
 
     /**
      * 标记是否为前段节点，代表者可以发送command，并向leader发送排序
@@ -159,8 +174,9 @@ public class TPOChainProto extends GenericProtocol {
     //闹钟的开启和关闭，
     //不进行关闭
     private long frontflushMsgTimer = -1;
-    
 
+    // 还有一个field ： System.currentTimeMillis(); 隐含了系统的当前时间
+    
     
 
     /**
@@ -197,7 +213,7 @@ public class TPOChainProto extends GenericProtocol {
     
     
 
-    //TODO 分发时的配置信息
+    // 分发时的配置信息
     /**
      * 对节点的一些配置信息，主要是各前链节点分发的实例信息
      * 和 接收到accptcl的数量
@@ -207,10 +223,8 @@ public class TPOChainProto extends GenericProtocol {
 
     
     
-    //TODO 新加入节点除了获取系统的状态，
-    // 还要获取系统的membership状态
-
-
+    //TODO 新加入节点除了获取系统的状态，还要获取系统的membership状态
+    
     /**
      * 加入节点时需要的一些配置
      * */
@@ -401,7 +415,7 @@ public class TPOChainProto extends GenericProtocol {
         registerRequestHandler(SubmitBatchRequest.REQUEST_ID, this::onSubmitBatch);
         registerRequestHandler(SubmitReadRequest.REQUEST_ID, this::onSubmitRead);
 
-        
+        //根据初始设置：新加入节点是激活的还是等待加入的
         if (state == TPOChainProto.State.ACTIVE) {
             if (!seeds.contains(self)) {
                 logger.error("Non seed starting in active state");
@@ -418,16 +432,15 @@ public class TPOChainProto extends GenericProtocol {
 
     
 
-    //接下来几个方法涉及leader选举
     /**
-     * 初始状态开始启动
+     * 初始状态为Active开始启动节点
      * */
     private void setupInitialState(List<Host> members, int instanceNumber) {
         //传进来的参数setupInitialState(seeds, -1);
         //这里根据传进来的顺序， 已经将前链节点和后链节点分清楚出了
         membership = new Membership(members, QUORUM_SIZE);
-        // TODO 废弃nextokcl是排序
-        nextOkCl = membership.nextLivingInChain(self);
+        
+        //nextOkCl = membership.nextLivingInChain(self);
         //TODO 对排序的下一个节点准备，打算在这里
         nextOkFront =membership.nextLivingInFrontedChain(self);
         nextOkBack=membership.nextLivingInBackChain(self);
@@ -452,11 +465,62 @@ public class TPOChainProto extends GenericProtocol {
         if(membership.isFrontChainNode(self).equals(Boolean.TRUE)){
             frontChainNodeAction();
         }
+        else {//成为后链节点
+            
+        }
 //        //设置领导超时处理
 //        leaderTimeoutTimer = setupPeriodicTimer(LeaderTimer.instance, LEADER_TIMEOUT, LEADER_TIMEOUT / 3);
 //        lastLeaderOp = System.currentTimeMillis();
     }
+
     
+    //TODO  新加入节点对系统中各个分发节点也做备份
+    /**
+     * 新节点加入成功后 执行的方法
+     * */  
+    private void setupJoinInitialState(Pair<List<Host>, Map<Host,Boolean>> members, int instanceNumber) {
+        //传进来的参数setupInitialState(seeds, -1);
+        //这里根据传进来的顺序， 已经将前链节点和后链节点分清楚出了
+        membership = new Membership(members, QUORUM_SIZE);
+        // TODO 废弃nextokcl是排序
+        nextOkCl = membership.nextLivingInChain(self);
+        //TODO 对排序的下一个节点准备，打算在这里
+        nextOkFront =membership.nextLivingInFrontedChain(self);
+        nextOkBack=membership.nextLivingInBackChain(self);
+        //next
+        members.getLeft().stream().filter(h -> !h.equals(self)).forEach(this::openConnection);
+        //对全局的排序消息进行配置  -1
+        joiningInstanceCl = highestAcceptedInstanceCL = highestAcknowledgedInstanceCl = highestDecidedInstanceCl =
+                instanceNumber;// instanceNumber初始为-1
+        //对命令分发进行初始化配置
+        for (Host temp:members.getLeft()) {
+            //对分发的配置进行初始化  hostConfigureMap
+            //  Map<Host,RuntimeConfigure>
+            RuntimeConfigure runtimeConfigure=new RuntimeConfigure();
+            hostConfigureMap.put(temp,runtimeConfigure);
+
+            //局部日志进行初始化 
+            //Map<Host,Map<Integer, InstanceState>> instances 
+            Map<Integer, InstanceState>  ins=new HashMap<>();
+            instances.put(temp,ins);
+        }
+        //当判断当前节点是否为前链节点
+        if(membership.isFrontChainNode(self).equals(Boolean.TRUE)){
+            frontChainNodeAction();
+        }
+        else {//成为后链节点
+
+        }
+//        //设置领导超时处理
+//        leaderTimeoutTimer = setupPeriodicTimer(LeaderTimer.instance, LEADER_TIMEOUT, LEADER_TIMEOUT / 3);
+//        lastLeaderOp = System.currentTimeMillis();
+    }
+    //TODO 考虑 ：
+    // 节点不仅可能出现故障，可能出现节点良好但网络延迟造成的相似故障，需要考虑这个
+    
+    //TODO  考虑删除节点
+    // 在删除节点时 leader故障
+    // 在删除节点时 它又新加入集群
     
     //前链节点执行的pre操作
     private  void  frontChainNodeAction(){
@@ -473,15 +537,6 @@ public class TPOChainProto extends GenericProtocol {
         nextOkBack=membership.nextLivingInBackChain(self);
     }
     
-    //TODO 失去前链节点
-    private  void  cancelfrontChainNodeAction(){
-        //取消拥有了设置选举leader的资格
-        //取消设置领导超时处理
-        cancelTimer(leaderTimeoutTimer)   ;
-        lastLeaderOp = System.currentTimeMillis();
-        //标记为前段节点
-        amFrontedNode = false;
-    }
     
     
     //TODO  抑制一些候选举leader的情况：只有在与leader相聚(F+1)/2 +1
@@ -493,13 +548,10 @@ public class TPOChainProto extends GenericProtocol {
     private void onLeaderTimer(LeaderTimer timer, long timerId) {
         if (!amQuorumLeader && (System.currentTimeMillis() - lastLeaderOp > LEADER_TIMEOUT) &&
                 (supportedLeader() == null //初始为空  ，或新加入节点
-                        /**
-                         * 不需要，避免加入节点在链的前半部分结束并减慢一切。只有在节点加入时领导者选举才会发生。
-                         * */
                         //Not required, avoids joining nodes from ending in the first half of
                         // the chain and slowing everything down. Only would happen with leader
                         // election simultaneous with nodes joining.
-                        
+                        //下面这个条件发生在系统运行中，这个满足，上面那个节点只有在系统刚加入时才满足
                          ||  membership.distanceFrom(self, supportedLeader()) <= 2*QUORUM_SIZE
                         )) {
             tryTakeLeadership();
@@ -515,17 +567,26 @@ public class TPOChainProto extends GenericProtocol {
         assert !amQuorumLeader;
         //这instances是Map<Integer, InstanceState> instances
         //currentSN是Map.Entry<Integer, SeqN>类型数据
-        //为什么是ack信息
+        //为什么是ack信息，保证日志的连续
         InstanceStateCL instance = globalinstances.computeIfAbsent(highestAcknowledgedInstanceCl + 1, InstanceStateCL::new);
+        
         //private Map.Entry<Integer, SeqN> currentSN是
         //currentSN初始值是new AbstractMap.SimpleEntry<>(-1, new SeqN(-1, null));
         SeqN newSeqN = new SeqN(currentSN.getValue().getCounter() + 1, self);
-        
         instance.prepareResponses.put(newSeqN, new HashSet<>());
+        
         PrepareMsg pMsg = new PrepareMsg(instance.iN, newSeqN);
         membership.getMembers().forEach(h -> sendOrEnqueue(pMsg, h));
     }
-
+    
+    //TODO 对于各种消息，若收到不来自自己集群的消息，可以让其重新加入集群
+    private  void  verifyMsgSource(Host from) {
+        if (!membership.contains(from)) {
+            logger.warn("Received msg from unaffiliated host " + from);
+            sendMessage(new UnaffiliatedMsg(), from, TCPChannel.CONNECTION_IN);
+            return;
+        }
+    }
     
     /**
      * 处理PrepareMsg消息
@@ -543,7 +604,7 @@ public class TPOChainProto extends GenericProtocol {
             sendMessage(new UnaffiliatedMsg(), from, TCPChannel.CONNECTION_IN);
             return;
         }
-        
+        //正常流程到这
         if (msg.iN > highestAcknowledgedInstanceCl) {
             // currentSN消息是private Map.Entry<Integer, SeqN> currentSN;
             assert msg.iN >= currentSN.getKey();
@@ -561,18 +622,18 @@ public class TPOChainProto extends GenericProtocol {
                 }
                 sendOrEnqueue(new PrepareOkMsg(msg.iN, msg.sN, values), from);
                 lastLeaderOp = System.currentTimeMillis();
-            } else//否则丢弃
+            } else//当msg的SN小于等于  // 否则丢弃
                 logger.warn("Discarding prepare since sN <= hP");
         } else { //Respond with decided message  主要对于系统中信息滞后的节点进行更新
             /*
              若发送prepare消息的节点比接收prepare消息的节点信息落后，可以发送已经DecidedMsg信息
              */
             logger.info("Responding with decided");
-            List<AcceptedValue> values = new ArrayList<>(highestDecidedInstanceCl - msg.iN + 1);
+            List<AcceptedValueCL> values = new ArrayList<>(highestDecidedInstanceCl - msg.iN + 1);
             for (int i = msg.iN; i <= highestDecidedInstanceCl; i++) {
                 InstanceStateCL decidedInstance = globalinstances.get(i);
                 assert decidedInstance.isDecided();
-                values.add(new AcceptedValue(i, decidedInstance.highestAccept, decidedInstance.acceptedValue));
+                values.add(new AcceptedValueCL(i, decidedInstance.highestAccept, decidedInstance.acceptedValue));
             }
             sendOrEnqueue(new DecidedCLMsg(msg.iN, msg.sN, values), from);
         }
@@ -778,7 +839,9 @@ public class TPOChainProto extends GenericProtocol {
 
     
     
-    
+    //TODO 因为只有在分发和排序都存在才可以执行，若非leader故障
+    // 对非leader的排序消息要接着转发，不然程序执行不了
+    // 所以先分发，后排序
     
     
     
@@ -1028,7 +1091,7 @@ public class TPOChainProto extends GenericProtocol {
             openConnection(target);
 
             if (state == TPOChainProto.State.ACTIVE) {
-                sendMessage(new JoinSuccessMsg(instance.iN, instance.highestAccept, membership.shallowCopy()), target);
+                sendMessage(new JoinSuccessMsg(instance.iN, instance.highestAccept, membership.deepCopy()), target);
                 assert highestDecidedInstanceCl == instance.iN;
                 //TODO need mechanism for joining node to inform nodes they can forget stored state
                 pendingSnapshots.put(target, MutablePair.of(instance.iN, instance.counter == QUORUM_SIZE));
@@ -1273,9 +1336,13 @@ public class TPOChainProto extends GenericProtocol {
     
     
     //TODO 一个命令可以回复客户端，只有在它以及它之前所有实例被ack时，才能回复客户端
-    
     //TODO 执行命令,需要确保当一个命令执行时，它之前的命令必须已经执行  
     // 所以不是同步的，所以有时候可能
+    //TODO 只有一个实例的排序消息和分发消息都到齐了，才能进行执行
+    // 所以每次分发消息或 排序消息达到执行要求后，对之前的消息进行扫描，达到命令执行的要求
+    // 即(分发和排序消息全部到齐之后)进行执行
+    // 这里也包括了GC(垃圾收集)
+    // 垃圾收集 既对局部日志GC也对全局日志进行GC
     private void execute(){
         //
         //TODO从
@@ -1311,15 +1378,37 @@ public class TPOChainProto extends GenericProtocol {
     private void uponUnaffiliatedMsg(UnaffiliatedMsg msg, Host from, short sourceProto, int channel) {
         if (state == TPOChainProto.State.ACTIVE && membership.contains(from)){
             logger.error("Looks like I have unknowingly been removed from the membership, rejoining");
+            //全局日志清空
             globalinstances.clear();
-            cancelTimer(leaderTimeoutTimer);
+            //局部日志清空
+            //TODO 新加入节点需要考虑局部日志
+            
+            if (membership.isFrontChainNode(self)){
+                cancelfrontChainNodeAction();
+            }else {//后链
+                
+            }
+            //cancelTimer(leaderTimeoutTimer);
+            //关闭连接
             membership.getMembers().stream().filter(h -> !h.equals(self)).forEach(this::closeConnection);
             membership = null;
             state = TPOChainProto.State.JOINING;
             joinTimer = setupTimer(JoinTimer.instance, 1000);
         }
     }
+    //TODO 失去前链节点
+    private  void  cancelfrontChainNodeAction(){
+        //取消拥有了设置选举leader的资格
+        //取消设置领导超时处理
+        cancelTimer(leaderTimeoutTimer)   ;
+        lastLeaderOp = System.currentTimeMillis();
 
+        //标记为后段节点
+        amFrontedNode = false;
+    }
+
+
+    //TODO  新加入节点应该联系后链节点，不应该联系前链节点
     /**
      * 处理新节点的join
      * */
@@ -1353,7 +1442,11 @@ public class TPOChainProto extends GenericProtocol {
             hostsWithSnapshot.add(from);
             cancelTimer(joinTimer);
             logger.info("Join successful");
-            setupInitialState(msg.membership, msg.iN);
+            //TODO 这里也需要membership的状态信息
+            //构造函数也得变
+            
+            //setupInitialState(msg.membership, msg.iN);
+            setupJoinInitialState(msg.membership,msg.iN);
             setNewInstanceLeader(msg.iN, msg.sN);
             if (receivedState != null) {//第F+1节点传递过来StateTransferMsg消息
                 assert receivedState.getKey().equals(msg.iN);
@@ -1371,7 +1464,7 @@ public class TPOChainProto extends GenericProtocol {
     }
 
     /**
-     *重新请求快照
+     *时钟  重新请求快照
      * */
     private void onStateTransferTimer(StateTransferTimer timer, long timerId) {
         if (state == TPOChainProto.State.WAITING_STATE_TRANSFER) {
@@ -1462,7 +1555,10 @@ public class TPOChainProto extends GenericProtocol {
 
 
 
-
+//TODO 在节点候选时
+// waitingAppOps   waitingMembershipOps接收正常操作 
+// 不应该接收，因为当前的候选节点不是总能成为leader，那么暂存的这些消息将被扔掉进行废弃处理
+    
 
 /**----------------涉及读 写  成员更改--------------------------------------------------- */
     
@@ -1472,7 +1568,8 @@ public class TPOChainProto extends GenericProtocol {
      */
     public void onSubmitBatch(SubmitBatchRequest not, short from) {
         if (amQuorumLeader)
-            sendNextAccept(new AppOpBatch(not.getBatch()));
+            sendNextAcceptCL(new AppOpBatch(not.getBatch()));
+        //打算废弃
         else if (supportedLeader().equals(self))
             waitingAppOps.add(new AppOpBatch(not.getBatch()));
         else //忽视接受的消息
@@ -1485,7 +1582,7 @@ public class TPOChainProto extends GenericProtocol {
      * */
     public void onSubmitRead(SubmitReadRequest not, short from) {
         int readInstance = highestAcceptedInstanceCL + 1;
-        globalinstances.computeIfAbsent(readInstance, InstanceState::new).attachRead(not);
+        globalinstances.computeIfAbsent(readInstance, InstanceStateCL::new).attachRead(not);
     }
 
 
@@ -1494,7 +1591,8 @@ public class TPOChainProto extends GenericProtocol {
      */
     private void uponMembershipOpRequestMsg(MembershipOpRequestMsg msg, Host from, short sourceProto, int channel) {
         if (amQuorumLeader)
-            sendNextAccept(msg.op);
+            sendNextAcceptCL(msg.op);
+        //打算废弃
         else if (supportedLeader().equals(self))
             waitingMembershipOps.add(msg.op);
         else

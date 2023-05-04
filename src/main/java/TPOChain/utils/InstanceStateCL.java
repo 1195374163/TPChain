@@ -31,8 +31,9 @@ public class InstanceStateCL {
     /**
      * c-instance和o-instance是否都发了的标记位，在新leader选举时，考虑到是否向leader发送request问题。
      */
-
+    
     //private  boolean   coconcurrency;
+    //日志，节点根据消息在本地生成对应的instanceStateCL
     public InstanceStateCL(int iN) {
         this.iN = iN;
         this.highestAccept = null;

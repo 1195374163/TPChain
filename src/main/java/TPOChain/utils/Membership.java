@@ -1,5 +1,7 @@
 package TPOChain.utils;
 
+import org.apache.commons.lang3.tuple.MutablePair;
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import pt.unl.fct.di.novasys.network.data.Host;
@@ -72,7 +74,33 @@ public class Membership {
         checkSizeAgainstMaxFailures();
     }
     
+    
+    //新加入节点根据状态进行对集群全部节点以及节点的状态的恢复
+    public  Membership(Pair<List<Host>, Map<Host,Boolean>> mem,int MIN_QUORUM_SIZE){
+        this.MIN_QUORUM_SIZE = MIN_QUORUM_SIZE;
+        members = new ArrayList<>(mem.getLeft());
+        indexMap = new HashMap<>();
 
+        frontedChainNode = mem.getRight();
+        
+        //调试输出前链节点
+        List<Host> frontChainNode=new ArrayList();
+        for (HashMap.Entry<Host, Boolean> entry : frontedChainNode.entrySet()) {
+            Host key = entry.getKey();
+            Boolean value = entry.getValue();
+            if (value.equals(Boolean.TRUE)){
+                frontChainNode.add(key);
+            }
+        }
+        logger.warn("前链节点 " + frontChainNode.toString());
+
+
+        pendingRemoval = new HashSet<>();
+        //logger.info("New " + this);
+        checkSizeAgainstMaxFailures();
+    }
+
+    
     /**
      *确定当前节点数小于MIN_QUORUM_SIZE的系统最终节点数 则终止系统
      */
@@ -307,6 +335,7 @@ public class Membership {
     
     
     
+    //在对于新加入节点时，可能需要这些操作
     
     //在接收一些删除节点操作的实例时，先进行可能移除
     //在删除操作时，先进行标记，后进行删除
@@ -428,7 +457,7 @@ public class Membership {
     }
     
     
-    //有使用
+    //有使用 ：在对消息进行群发时需要调用这个
     //在tryTakeLeadership()中发送prepareMsg给其他节点
     //可能返回断开的节点
     public List<Host> getMembers() {
@@ -455,5 +484,12 @@ public class Membership {
     //得到全体成员
     public List<Host> shallowCopy() {
         return new ArrayList<>(members);
+    }
+    
+    
+    // Map<Host,Boolean> frontedChainNode;
+    //对新加入节点的对集群的节点信息以及前链节点进行拷贝
+    public Pair<List<Host>,Map<Host,Boolean>> deepCopy(){
+        return new MutablePair<>(new ArrayList<>(members),new HashMap<>(frontedChainNode));
     }
 }
