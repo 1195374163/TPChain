@@ -1,17 +1,17 @@
 package common.values;
 
-import frontend.ops.OpBatch;
+
 import io.netty.buffer.ByteBuf;
 import pt.unl.fct.di.novasys.network.data.Host;
 
 import java.io.IOException;
 import java.util.Objects;
 
-//TODO leader发送的排序消息      
+// leader发送的排序消息      
 public class SortValue extends PaxosValue {
     
     private  final Host node;
-    private  final   int  iN;
+    private  final int  iN;
     
     public SortValue(Host node,int iN) {
 //        super(Type.SORT);
@@ -20,7 +20,7 @@ public class SortValue extends PaxosValue {
         this.iN=iN;
     }
 
-    public Host getnode() {
+    public Host getNode() {
         return node;
     }
 
@@ -42,18 +42,19 @@ public class SortValue extends PaxosValue {
         if (this == o) return true;
         if (!(o instanceof SortValue)) return false;
         SortValue that = (SortValue) o;
-        return (node.equals(that.getnode()) && (iN==that.getiN()));
+        return (node.equals(that.getNode()) && (iN==that.getiN()));
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(node,iN);
     }
-
+    
+    //父类paxosvalue会使用
     static ValueSerializer serializer = new ValueSerializer<SortValue>() {
         @Override
         public void serialize(SortValue sort_value, ByteBuf out) throws IOException {
-            Host.serializer.serialize(sort_value.getnode(),out);
+            Host.serializer.serialize(sort_value.getNode(),out);
             out.writeInt(sort_value.getiN());
         }
 

@@ -61,8 +61,9 @@ public class TPOChainProto extends GenericProtocol {
     private final int QUORUM_SIZE;
     private final int RECONNECT_TIME;
 
-    //  对各项超时的依赖关系：
-    // 如  noOp_sended_timeout  leader_timeout  reconnect_timeout
+    //  Notice 对各项超时的依赖关系：
+    //   noOp_sended_timeout  leader_timeout  reconnect_timeout
+    //下面是具体取值
     /**
      * leader_timeout=5000
      * noop_interval=100
@@ -171,8 +172,7 @@ public class TPOChainProto extends GenericProtocol {
     //主要是前链什么时候发送
     private long lastAcceptTime;
     //TODO 在commandleader发送第一条命令的时候开启闹钟，在发完三次flushMsg之后进行关闭
-    //闹钟的开启和关闭，
-    //不进行关闭
+    // 闹钟的开启和关闭 不进行关闭
     private long frontflushMsgTimer = -1;
 
     // 还有一个field ： System.currentTimeMillis(); 隐含了系统的当前时间
@@ -295,8 +295,7 @@ public class TPOChainProto extends GenericProtocol {
         
         self = new Host(InetAddress.getByName(props.getProperty(ADDRESS_KEY)),
                 Integer.parseInt(props.getProperty(PORT_KEY)));
-        //TODO 废弃
-        nextOkCl = null;
+
         //不管是排序还是分发消息：标记下一个节点
         nextOkFront =null;
         nextOkBack=null;
@@ -587,13 +586,37 @@ public class TPOChainProto extends GenericProtocol {
     }
 
     
-    //TODO 当一个前链节点故障时，要对其转发的command进行重新转发，可以由新leader收集并，保证局部日志不为空，否则全局日志有
-    // 而局部日志没有，导致系统进行不下去
+    //TODO 当一个前链节点故障时，要对其转发的command进行重新转发，可以由新leader收集并，保证局部日志不为空，
+    // 否则全局日志有，而局部日志没有，导致系统进行不下去
     
     
-    /**
+    // Notice 
+    //  消息的去重复处理：根据id和SN对相同的消息直接丢弃
+    
+    
+    
+    //Notice
+    // 消息的时效性 ：某个节点发送某个消息之后，会等待此消息的特定回复
+    // 但要是此节点此时接收到其他消息导致此节点状态往前更近一步，发生了状态的迁移
+    // 那么之前的消息回复是过时的
+    // 还有一种情况
+    // 此节点会接收term比当前tem小的过时消息，此消息已经失效
+    
+    
+    //Notice
+    // 消息的有效性
+    // 发送消息的节点一定是自己集群中的节点
+    
+    
+    
+    // Notice 
+    //  消息的顺序性：
+    
+    
+    
+    /*
      * 处理PrepareMsg消息
-     * */
+     */
     /**
      * logger.info(msg + " 来自: " + from);
      * */
@@ -767,17 +790,17 @@ public class TPOChainProto extends GenericProtocol {
     }
 
     // Notice 
-    /**
+    /*
      *  一种情况是：
      *  当一个处于中间节点状态的节点向比它先进的节点  或  落后节点发送prepare消息，先进节点回复
      *  decideCLMsg，落后节点回复  prepareoK消息，怎么处理
-     * */
+     * /
     
     
     // Notice 
     /**
      *  对prepareokMsg来的消息进行学习
-     * 
+     *  因为PrepareokMsg携带的信息是那个节点accept信息
      * */
     
     
@@ -821,7 +844,7 @@ public class TPOChainProto extends GenericProtocol {
                 }
             }else {//不需要管
                 //到达这里 表明这个节点已经有了对应的实例，且那个实例的leader term大于
-                // 消息中的term
+                // 消息中的term，那么不对Msg中的消息进行更新
             }
         }
 
@@ -845,11 +868,10 @@ public class TPOChainProto extends GenericProtocol {
         }
     }
     
-    //TODO 在
+    //Notice
+    // 在leader选举成功，前链节点才能开始工作
     
-    
-    
-    
+    //NOTE 
     
     /**
      * I am leader now! @ instance
@@ -890,10 +912,10 @@ public class TPOChainProto extends GenericProtocol {
                         self, getProtoId(), peerChannel);
             }
         });
-            
+        
+        //设置为0立马给其他节点发送消息
         lastAcceptTimeCl = 0;
 
-        
         
         
         /**
@@ -933,24 +955,17 @@ public class TPOChainProto extends GenericProtocol {
     
     
     
-
     /**
      * 成为前链节点，这里不应该有cl后缀
      * */
-    private  void   becomeFrontedChain(){
-        //拥有了设置选举leader的资格
-        //设置领导超时处理
-        leaderTimeoutTimer = setupPeriodicTimer(LeaderTimer.instance, LEADER_TIMEOUT, LEADER_TIMEOUT / 3);
-        lastLeaderOp = System.currentTimeMillis();
-        
+    private  void   becomeFrontedChainNode(){
+        logger.info("I am FrontedChain now! ");
         //标记为前段节点
         amFrontedNode = true;
-        flushMsgTimer = setupPeriodicTimer(FlushMsgTimer.instance, NOOP_SEND_INTERVAL, Math.max(NOOP_SEND_INTERVAL / 3,1));
-        logger.info("I am FrontedChain now! ");
-        lastAcceptTime = 0;
+        frontflushMsgTimer = setupPeriodicTimer(FlushMsgTimer.instance, NOOP_SEND_INTERVAL, Math.max(NOOP_SEND_INTERVAL / 3,1));
+        lastAcceptTime = System.currentTimeMillis();
     }
-    private  long lastAcceptTime=-1;
-    private long flushMsgTimer = -1; 
+ 
     
     //TODO  当前链节点的accpt与ack标志相当时，cancel  flushMsg闹钟
     // 每当accpet+1时设置  flushMsg时钟
@@ -966,19 +981,9 @@ public class TPOChainProto extends GenericProtocol {
                 sendNextAcceptCL(new NoOpValue());
         } else {
             logger.warn(timer + " while not FrontedChain");
-            cancelTimer(flushMsgTimer);
+            cancelTimer(frontflushMsgTimer);
         }
     }
-    
-    
-
-    //TODO  若前链节点不满足F+1，对后链的首节点进行pull协议
-    //TODO  废弃：在
-    private  void  pullfirstBackHeadNode(){
-        
-        
-    }
-    
     
     
     
@@ -995,7 +1000,8 @@ public class TPOChainProto extends GenericProtocol {
     private void uponOrderMSg(AcceptMsg msg, Host from, short sourceProto, int channel) {
         if (amQuorumLeader){//只有leader才能处理这个排序请求
 
-        }else {
+        }else {//对消息进行转发
+            logger
         }
     }
     
@@ -1038,8 +1044,12 @@ public class TPOChainProto extends GenericProtocol {
     }
     
     
-    //上面那两个方法是
+    //上面那两个方法是leader独有的，只有leader才能访问
+    //下面的关于排序的方法是所有节点都能访问处理的
     
+    
+    //Notice
+    //注意 对过时消息的处理
 
     private void uponAcceptCLMsg(AcceptCLMsg msg, Host from, short sourceProto, int channel) {
         //对不在系统中的节点发送未定义消息让其重新加入系统
@@ -1302,6 +1312,9 @@ public class TPOChainProto extends GenericProtocol {
     }
     
     
+    
+    
+    
     /**
      * 处理accept信息
      */
@@ -1495,24 +1508,13 @@ public class TPOChainProto extends GenericProtocol {
         //
         //TODO从
         
+        
+        
     }
 
+    //Notice
+    //GC回收
 
-
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
     //TODO  新加入的currentSN怎么解决，会不会触发leader的选举
     //  应该不会，不是前链节点 
     // 那原协议，怎么解决：
@@ -1553,6 +1555,9 @@ public class TPOChainProto extends GenericProtocol {
 
         //标记为后段节点
         amFrontedNode = false;
+        
+        //取消作为后链节点的定时刷新 
+        cancelTimer(frontflushMsgTimer); 
     }
 
 

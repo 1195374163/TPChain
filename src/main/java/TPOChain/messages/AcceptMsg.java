@@ -12,18 +12,19 @@ import java.io.IOException;
 public class AcceptMsg extends ProtoMessage {
 
     public static final short MSG_CODE = 202;
-
-    public final  Host node;
+    
+    
     public final int iN;
 
     public final SeqN sN;
     public final PaxosValue value;
     public final short nodeCounter;
     public final int ack;
+    
 
-    public AcceptMsg(Host node,int iN,SeqN sN, short nodeCounter, PaxosValue value, int ack) {
+    public AcceptMsg(int iN,SeqN sN, short nodeCounter, PaxosValue value, int ack) {
         super(MSG_CODE);
-        this.node=node;
+
         this.iN = iN;
         
         this.sN = sN;
@@ -36,7 +37,6 @@ public class AcceptMsg extends ProtoMessage {
     @Override
     public String toString() {
         return "AcceptMsg{" +
-                "node=" + node +
                 "iN=" + iN +
                 ", sN=" + sN +
                 ", value=" + value +
@@ -47,7 +47,6 @@ public class AcceptMsg extends ProtoMessage {
 
     public static ISerializer<? extends ProtoMessage> serializer = new ISerializer<AcceptMsg>() {
         public void serialize(AcceptMsg msg, ByteBuf out) throws IOException {
-            Host.serializer.serialize(msg.node,out);
             out.writeInt(msg.iN);
             msg.sN.serialize(out);
             out.writeShort(msg.nodeCounter);
@@ -56,13 +55,12 @@ public class AcceptMsg extends ProtoMessage {
         }
 
         public AcceptMsg deserialize(ByteBuf in) throws IOException {
-            Host t=Host.serializer.deserialize(in);
             int instanceNumber = in.readInt();
             SeqN sN = SeqN.deserialize(in);
             short nodeCount = in.readShort();
             PaxosValue payload = PaxosValue.serializer.deserialize(in);
             int ack = in.readInt();
-            return new AcceptMsg(t,instanceNumber,sN, nodeCount, payload, ack);
+            return new AcceptMsg(instanceNumber,sN, nodeCount, payload, ack);
         }
     };
 }

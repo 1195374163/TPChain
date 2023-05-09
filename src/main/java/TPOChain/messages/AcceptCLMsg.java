@@ -35,7 +35,7 @@ public class AcceptCLMsg extends ProtoMessage {
 
     @Override
     public String toString() {
-        return "AcceptMsg{" +
+        return "AcceptCLMsg{" +
                 "iN=" + iN +
                 ", sN=" + sN +
                 ", nodeCounter=" + nodeCounter +
@@ -51,14 +51,7 @@ public class AcceptCLMsg extends ProtoMessage {
             out.writeInt(msg.ack);
             PaxosValue.serializer.serialize(msg.value, out);
         }
-
-        /**
-         * public final Host node;
-         * this.node=node;
-         *  "node=" + node +
-         * Host.serializer.serialize(msg.node,out);
-         * Host t=Host.serializer.deserialize(in);
-         * */
+        
         public AcceptCLMsg deserialize(ByteBuf in) throws IOException {
             int instanceNumber = in.readInt();
             SeqN sN = SeqN.deserialize(in);

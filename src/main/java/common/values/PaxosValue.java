@@ -7,7 +7,7 @@ import java.io.IOException;
 
 
 public abstract class PaxosValue {
-
+    
     interface ValueSerializer<T extends PaxosValue> extends ISerializer<T> {
     }
 

@@ -7,7 +7,7 @@ import java.io.IOException;
 import java.util.Objects;
 
 public class MembershipOp extends PaxosValue {
-
+    
     public enum OpType {
         ADD(0),
         REMOVE(1);
@@ -35,7 +35,7 @@ public class MembershipOp extends PaxosValue {
     public final OpType opType;
     public final Host affectedHost;
     public final int position; //to-remove hack
-
+    
     private MembershipOp(OpType opType, Host affectedHost, int position) {
         super(Type.MEMBERSHIP);
         this.opType = opType;
@@ -43,7 +43,7 @@ public class MembershipOp extends PaxosValue {
         this.position = position;
     }
 
-
+    
     public static MembershipOp RemoveOp(Host affectedHost){
         return new MembershipOp(OpType.REMOVE, affectedHost, -1);
     }

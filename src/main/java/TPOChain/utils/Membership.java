@@ -25,7 +25,7 @@ public class Membership {
     
     
     //所有节点在前链的标识，true标识前链，false标识后链
-    private  final  Map<Host,Boolean> frontedChainNode;
+    private  final   Map<Host,Boolean> frontedChainNode;
     
     //对于要删除的节点，还保留着原来在list中的位置，并且将其纳入pendingRemoval集合
     //在查询得到下一个节点要跳过这个节点

@@ -6,7 +6,9 @@ import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
 import pt.unl.fct.di.novasys.network.ISerializer;
 import java.io.IOException;
 
-//TODO 拉取后链首节点成为前链节点 
+// 这个Msg没启用
+
+// 拉取后链首节点成为前链节点 
 // 时机时机在删除节点时
 
 public class PullFrontedNodeMsg extends ProtoMessage {
