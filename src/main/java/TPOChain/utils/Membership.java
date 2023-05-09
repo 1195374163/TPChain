@@ -166,7 +166,12 @@ public class Membership {
     }
     
     //若是前链节点的话，它的后链节点就是后链首节点
-    
+
+    //TODO  使用这个方法时，应该进行判定是否返回值为null，为null，标志着此节点是链尾
+    // 因为这个是前链，那么在收到它的逻辑链的链头消息，对其进行decided的时候
+    // 需要向链头发送ack信息
+    // 在整个系统只有前链节点时，没有后链时，，即系统正好F+1各前链节点
+    // 每进行节点的删除处理应该整个系统存活的节点是否满足F+1 
     /**
      * 返回当前节点在后段链的下一个存活节点s
      * */
@@ -176,7 +181,8 @@ public class Membership {
        
         //特殊判定：如果是前链节点，后链的首节点一定是它的nextBackChainNode
         if (frontedChainNode.get(myHost).equals(Boolean.TRUE)){
-            return getBackChainHead();
+            Host temp=getBackChainHead();
+            return temp;
         }
         
         //后面是后链节点的流程
@@ -190,7 +196,37 @@ public class Membership {
         return nextHost;
     }
 
+    //TODO  判断是否是逻辑链的尾部， 
+    // 针对前链和 后链节点 不同的判定标准
     
+    //因为删除前链节点，会导入
+    public boolean isAfterLeader(Host me, Host leader, Host other) {
+        if(!contains(me) || !contains(leader) || !contains(other)){
+            logger.error("Membership does not contain: " + me + " " + leader + " " + other + ".." + members);
+        }
+        assert contains(me) && contains(leader) && contains(other);
+        
+        //if (membership.isAfterLeader(self, inst.highestAccept.getNode(), target)
+        //上面是这个函数的调用参数
+        if (frontedChainNode.get(me).equals(Boolean.TRUE)){//说明为前链
+            //前链只有在没有后链节点时才为链尾
+            if (getBackChainHead()==null) {
+                //只有消息的leader是当前节点的前链的前继，才能说明是链尾
+                
+            } else {//说明还有后链节点
+                return  false;
+            }
+        }else{
+            //说明为后链
+            Host tail=getBackChainTail();
+            if (tail.equals(me)){
+                return true;
+            }else {
+                return false;
+            }
+        }
+        return  false;
+    }
     //TODO 需要修改 因为前链和后链
     //通用 ：对前链节点和后链:根据目标Host的类型，也返回中间的一些节点
     //哪怕中间有节点属于pendingRemove，也会向其发送消息
@@ -232,7 +268,7 @@ public class Membership {
                 return  temp;
             }
         }
-        return null;//不应该到这
+        return null;//在整个系统没有后链时，返回null
     }
     
     /**
@@ -431,25 +467,7 @@ public class Membership {
     
 
 
-    //TODO 废弃
-    // 判断是链尾 后链的同时下一个元素是leader才是链尾
-    // other 是下一个节点
-    /**
-     * 判断后链的节点是否是链中的最后的节点
-     * */
-    public boolean isAfterLeader(Host me, Host leader, Host other) {
-        if(!contains(me) || !contains(leader) || !contains(other)){
-            logger.error("Membership does not contain: " + me + " " + leader + " " + other + ".." + members);
-        }
-        assert contains(me) && contains(leader) && contains(other);
 
-
-        if (me.equals(other)) return true;
-        int distLeader = distanceFrom(leader, me);
-        int distOther = distanceFrom(other, me);
-        if (distLeader == 0) distLeader += members.size();
-        return distOther >= distLeader;
-    }
 
 
     //TODO 废弃  排序应该先前链 ，后后链
@@ -498,10 +516,35 @@ public class Membership {
     }
     
     
+    // 在请求状态时向后链节点请求
+    public  List <Host> copyBackChain(Host leader){
+        //如果有后链的话
+        //没有后链，则返回leader逻辑链的尾节点
+        List <Host>  result=new ArrayList<>();     
+        if (getBackChainHead()==null){//没有后链
+            result.add(frontChainLogicTail(leader));
+        }else {//有后链
+            for (Host temp:members) {
+                if (frontedChainNode.get(temp).equals(Boolean.FALSE) && !pendingRemoval.contains(temp)){
+                    result.add(temp)  ;
+                }
+            }
+        }
+        return result;
+    }
+
     //这里不需要改变，因为调用这个方法的是刚加入节点向全体广播 joinsuccessMsg,用这个方法
     //得到全体成员
     public List<Host> shallowCopy() {
         return new ArrayList<>(members);
+    }
+    
+    public Map<Host,Boolean>   copyFrontedChainNode(){
+        return new HashMap<>(frontedChainNode);
+    }
+    
+    public  Set<Host> copyPendingRemoval(){
+        return new HashSet<>(pendingRemoval);
     }
     
     
@@ -510,4 +553,5 @@ public class Membership {
     public Pair<List<Host>,Map<Host,Boolean>> deepCopy(){
         return new MutablePair<>(new ArrayList<>(members),new HashMap<>(frontedChainNode));
     }
+    
 }

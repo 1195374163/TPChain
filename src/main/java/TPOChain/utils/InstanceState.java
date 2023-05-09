@@ -6,7 +6,8 @@ import pt.unl.fct.di.novasys.network.data.Host;
 
 import java.util.*;
 /**
- * instance的实例
+ * 局部日志条目：instance的实例 
+ * commandleader除了发送appbatch分发消息，还有NOOP消息对之前消息的ack信息，
  * */
 public class InstanceState {
     //要对SeqN进行改造，Seq的Node节点标记从哪个commandleader发来的
@@ -15,27 +16,15 @@ public class InstanceState {
     public PaxosValue acceptedValue;
     public short counter;
     private boolean decided;
-//    //TODO 这个要去掉，
-//    public Map<SeqN, Set<Host>> prepareResponses;
-
     
-//    //TODO 附加的读  这个要去掉
-//    private Map<Short, Queue<Long>> attachedReads;
-//    
     
-
-    /**
-     * c-instance和o-instance是否都发了的标记位，在新leader选举时，考虑到是否向leader发送request问题。
-     */
-    //private  boolean   coconcurrency;
+    
     public InstanceState(int iN) {
         this.iN = iN;
         this.highestAccept = null;
         this.acceptedValue = null;
         this.counter = 0;
         this.decided = false;
-//        this.prepareResponses = new HashMap<>();
-//        this.attachedReads = new HashMap<>();
     }
 
     @Override
@@ -46,19 +35,10 @@ public class InstanceState {
                 ", acceptedValue=" + acceptedValue +
                 ", counter=" + counter +
                 ", decided=" + decided +
-//                ", prepareResponses=" + prepareResponses +
                 '}';
     }
     
-    //对读取消，在传播消息的instance不附加读请求，将读请求附加在排序的请求上
-    
-//    public void attachRead(SubmitReadRequest request) {
-//        if (decided) throw new IllegalStateException();
-//        attachedReads.computeIfAbsent(request.getFrontendId(), k -> new LinkedList<>()).add(request.getBatchId());
-//    }
-//    public Map<Short, Queue<Long>> getAttachedReads() {
-//        return attachedReads;
-//    }
+
 
     //TODO    forceAccept和accpt区别
     //If it is already decided by some node, or received from prepareOk

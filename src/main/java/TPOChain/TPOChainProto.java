@@ -96,7 +96,7 @@ public class TPOChainProto extends GenericProtocol {
     private final Host self;
 
     
-    //TODO 废弃，使用下面那两个进行转发消息
+    // 废弃，使用下面那两个进行转发消息
     //private Host nextOkCl;
    
     //对于leader的排序消息和分发消息都是同一个消息通道，
@@ -128,7 +128,7 @@ public class TPOChainProto extends GenericProtocol {
      * 代表着leader，有term 和  Host 二元组组成
      * */
     private Map.Entry<Integer, SeqN> currentSN;
-    
+    //SeqN是一个term,由<int,host>组成，而currentSN前面的Int，是term刚开始的实例号
     
 
     /**
@@ -171,6 +171,7 @@ public class TPOChainProto extends GenericProtocol {
     private boolean amFrontedNode;
     //主要是前链什么时候发送
     private long lastAcceptTime;
+    
     //TODO 在commandleader发送第一条命令的时候开启闹钟，在发完三次flushMsg之后进行关闭
     // 闹钟的开启和关闭 不进行关闭
     private long frontflushMsgTimer = -1;
@@ -223,7 +224,9 @@ public class TPOChainProto extends GenericProtocol {
 
     
     
-    //TODO 新加入节点除了获取系统的状态，还要获取系统的membership状态
+    //TODO 新加入节点除了获取系统的状态，还要获取系统的membership，以及前链节点，以及哪些节点正在被删除状态
+    // 正因为这样在执行删除操作时，因进行 可能取消删除某节点操作  后面又添加这节点操作
+    // maybeCancelPendingRemoval   maybeAddToPendingRemoval
     
     /**
      * 加入节点时需要的一些配置
@@ -494,7 +497,8 @@ public class TPOChainProto extends GenericProtocol {
     }
     
     
-    //TODO  新加入节点对系统中各个分发节点也做备份
+    //TODO  新加入节点对系统中各个分发节点也做备份，
+    // 新加入节点执行这个操作
     /**
      * 新节点加入成功后 执行的方法
      * */  
@@ -953,6 +957,7 @@ public class TPOChainProto extends GenericProtocol {
     // 对非leader的排序消息要接着转发，不然程序执行不了
     // 所以先分发，后排序
     
+    //TODO  
     
     
     /**
@@ -963,6 +968,7 @@ public class TPOChainProto extends GenericProtocol {
         //标记为前段节点
         amFrontedNode = true;
         frontflushMsgTimer = setupPeriodicTimer(FlushMsgTimer.instance, NOOP_SEND_INTERVAL, Math.max(NOOP_SEND_INTERVAL / 3,1));
+        //这里不需要立即发送noop消息
         lastAcceptTime = System.currentTimeMillis();
     }
  
@@ -1493,7 +1499,8 @@ public class TPOChainProto extends GenericProtocol {
 
         ackInstance(msg.instanceNumber);
     }
-    
+
+
     
     
     //TODO 一个命令可以回复客户端，只有在它以及它之前所有实例被ack时，才能回复客户端

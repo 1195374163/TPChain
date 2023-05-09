@@ -6,18 +6,16 @@ import pt.unl.fct.di.novasys.network.data.Host;
 
 import java.util.*;
 
-//TODO leader除了发送排序消息，还有成员的更改消息
-// 有NOOP消息，有MembershipOP消息
+// 全局日志条目：
+// leader除了发送SortPaxos排序消息，还有成员的更改消息即MembershipOP，还有NOOP消息，
+
+
 public class InstanceStateCL {
 
     public final int iN;
     public SeqN highestAccept;
     public PaxosValue acceptedValue;
-//       
-//    public Host node;//哪个commandleader发出的
-//    public int  sequence;//在commandleader的第几个位置，即为commandleader的实例iN
-
-
+    
     //ack的数量
     public short counter;
     private boolean decided;
@@ -28,12 +26,12 @@ public class InstanceStateCL {
     private Map<Short, Queue<Long>> attachedReads;
 
 
-    /**
-     * c-instance和o-instance是否都发了的标记位，在新leader选举时，考虑到是否向leader发送request问题。
-     */
     
-    //private  boolean   coconcurrency;
     //日志，节点根据消息在本地生成对应的instanceStateCL
+    //哪几种情况会用到这个
+    //1 附加读的情况下
+    //2 进行prepare选举时用到这个 
+    //3 正常接收到新的序号的消息
     public InstanceStateCL(int iN) {
         this.iN = iN;
         this.highestAccept = null;
@@ -57,7 +55,7 @@ public class InstanceStateCL {
                 '}';
     }
     
-    
+    //read只挂载未decided的日志条目
     public void attachRead(SubmitReadRequest request) {
         if (decided) throw new IllegalStateException();
         attachedReads.computeIfAbsent(request.getFrontendId(), k -> new LinkedList<>()).add(request.getBatchId());

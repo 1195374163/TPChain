@@ -14,9 +14,7 @@ public class AcceptedValueCL {
     public final int instance;
     public final SeqN sN;
     public final PaxosValue value;
-//    public Host node;//哪个commandleader发出的
-//    public int  sequence;//在commandleader的第几个位置
-
+    
     
     
     public AcceptedValueCL(int instance, SeqN sN, PaxosValue value) {
