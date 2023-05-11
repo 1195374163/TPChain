@@ -270,8 +270,8 @@ public class HashMapApp implements Application {
             if (local) {
                 opInfo.getRight().writeAndFlush(new ResponseMessage(opInfo.getLeft(), new byte[0]));
                 if(logger.isDebugEnabled()) logger.debug("Responding");
-
             }
+            
         } else { //READ
             if (local) {
                 nReads++;

@@ -48,13 +48,16 @@ public class MembershipOp extends PaxosValue {
         return new MembershipOp(OpType.REMOVE, affectedHost, -1);
     }
 
+    /**
+     * 直接指定了位置
+     * */
     public static MembershipOp AddOp(Host affectedHost, int position){
         return new MembershipOp(OpType.ADD, affectedHost, position);
     }
 
 
     /**
-     * 返回构造好的MembershipOp对象
+     * 其他节点添加节点，生成这个消息
      * */
     public static MembershipOp AddOp(Host affectedHost){
         return new MembershipOp(OpType.ADD, affectedHost, -1);

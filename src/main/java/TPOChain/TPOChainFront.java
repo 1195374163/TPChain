@@ -37,7 +37,7 @@ public class TPOChainFront extends FrontendProto {
     private final int BATCH_SIZE;
     private final int LOCAL_BATCH_SIZE;
     
-    //Forwarded 对于发送下层协议的批处理，备份保存
+    //Forwarded 对于已经发送下层协议的批处理，备份保存
     private final Queue<Pair<Long, OpBatch>> pendingWrites;
     private final Queue<Pair<Long, List<byte[]>>> pendingReads;
     
@@ -113,7 +113,7 @@ public class TPOChainFront extends FrontendProto {
         
         registerTimerHandler(ReconnectTimer.TIMER_ID, this::onReconnectTimer);
         
-        
+        //接收来自 proto的请求
         registerReplyHandler(ExecuteReadReply.REPLY_ID, this::onExecuteRead);
         
         
@@ -166,7 +166,9 @@ public class TPOChainFront extends FrontendProto {
     }
     
     
-    //TODO  这里不用发送到leader处理
+    //TODO 这里不用发送到leader处理,需要发送到前链节点
+    //  要不每个后链每个节点都绑定一个前链节点？
+    // 
     /**
      * 将写信息转发至writeTo即leader处理
      * */
@@ -176,13 +178,10 @@ public class TPOChainFront extends FrontendProto {
     }
 
     
+
     /**
-     * 只传递写的batch信息到protocol层
-     * */
-    /**
-     * 连接下层的通道
-     * 将消息转发给下层的协议层
-     * 发送 TPOChainProto的submitBatchRequest
+     * 连接下层的通道 将消息转发给下层的协议层
+     * 只传递写的batch信息到protocol层 发送 TPOChainProto的submitBatchRequest
      * **/
 
     protected void onPeerBatchMessage(PeerBatchMessage msg, Host from, short sProto, int channel) {
@@ -232,7 +231,8 @@ public class TPOChainFront extends FrontendProto {
 
 
 
-
+    
+     //Notice front只连接到 writeto即 leader节点，对于其他节点不连接
     
     /**
      * 在TCP连接writesTO节点时，将pendingWrites逐条发送到下一个节点

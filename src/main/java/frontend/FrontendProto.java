@@ -37,7 +37,7 @@ public abstract class FrontendProto extends GenericProtocol {
     
     protected int peerChannel;
 
-    //系统中节点列表动态的更新
+    //系统中节点列表动态的更新，从下层的protocol层接收，是protocol层的membership的备份
     protected List<InetAddress> membership;
 
 
@@ -84,7 +84,7 @@ public abstract class FrontendProto extends GenericProtocol {
         subscribeNotification(MembershipChange.NOTIFICATION_ID, this::onMembershipChange);
         subscribeNotification(ExecuteBatchNotification.NOTIFICATION_ID, this::onExecuteBatch);
         subscribeNotification(InstallSnapshotNotification.NOTIFICATION_ID, this::onInstallSnapshot);
-
+        //接收来自proto的请求state的请求
         registerRequestHandler(GetSnapshotRequest.REQUEST_ID, this::onGetStateSnapshot);
        
        
@@ -96,6 +96,7 @@ public abstract class FrontendProto extends GenericProtocol {
     
     /**
      * 生成独一无二的有关ip和本地数字的MessageID
+     * 返回结果是两串字拼接的成果： (opcount，IP地址)
      * */
     protected long nextId() {
         //Message id is constructed using the server ip and a local counter (makes it unique and sequential)
@@ -150,7 +151,7 @@ public abstract class FrontendProto extends GenericProtocol {
 
 
     /**
-     * 发送到相应的协议Proto得到的快照
+     * 由proto请求，fronted接收，然后答复发送到相应的协议Proto得到的快照
      * */
     public void onGetStateSnapshot(GetSnapshotRequest not, short from) {
         byte[] state = app.getSnapshot();

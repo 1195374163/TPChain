@@ -199,7 +199,7 @@ public class Membership {
     //TODO  判断是否是逻辑链的尾部， 
     // 针对前链和 后链节点 不同的判定标准
     
-    //因为删除前链节点，会导入
+    //因为删除前链节点，会导入后链首节点成为替代原来位置的前链节点
     public boolean isAfterLeader(Host me, Host leader, Host other) {
         if(!contains(me) || !contains(leader) || !contains(other)){
             logger.error("Membership does not contain: " + me + " " + leader + " " + other + ".." + members);
@@ -453,7 +453,7 @@ public class Membership {
     
     
     /**
-     * 返回两个主机在链表中的距离
+     * 基本无用：只是保存 返回两个主机在链表中的距离
      * */
     public int distanceFrom(Host current, Host initial) {
         assert contains(current) && contains(initial);
@@ -486,8 +486,7 @@ public class Membership {
         return nextHost;
     }
     
-
-
+    
     
     public Host nodeAt(int pos){
         return members.get(pos);
@@ -526,7 +525,7 @@ public class Membership {
         }else {//有后链
             for (Host temp:members) {
                 if (frontedChainNode.get(temp).equals(Boolean.FALSE) && !pendingRemoval.contains(temp)){
-                    result.add(temp)  ;
+                    result.add(temp);
                 }
             }
         }
