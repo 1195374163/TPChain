@@ -104,7 +104,18 @@ public class Membership {
         //logger.info("New " + this);
         checkSizeAgainstMaxFailures();
     }
-
+    
+    //TODO join节点使用：复制集群中节点及其状态
+    public Membership(List<Host> initial, Map<Host,Boolean> fronted,Set<Host> remove ,int quorum){
+        members = new ArrayList<>(initial);
+        indexMap = new HashMap<>();
+        this.MIN_QUORUM_SIZE = quorum;
+        frontedChainNode= new HashMap<>(fronted);
+        pendingRemoval = new HashSet<>(remove);
+        checkSizeAgainstMaxFailures();
+    }
+    
+    
     
     /**
      *确定当前节点数小于MIN_QUORUM_SIZE的系统最终节点数 则终止系统
@@ -139,6 +150,8 @@ public class Membership {
         }
     }
     
+    //TODO  检测集群当前存活的节点，
+    // 不需要；在链尾检测不满F+1个投票，系统会终止
     
     
 
@@ -284,6 +297,11 @@ public class Membership {
     }
     
     
+    //TODO  若消息是原先被删除节点的消息怎么处理
+    //   一个判断消息的确认是否达到F+1 (因为前链节点是F+1)
+    //   一个
+    //Fixme 若消息的发送者不在节点中，应该返回null
+    //Notice  当leader
     /**
      * 返回当前节点若是前链节点的逻辑前链的末尾节点
      * */
@@ -514,8 +532,8 @@ public class Membership {
                 '}';
     }
     
-    
-    // 在请求状态时向后链节点请求
+    //TODO  废弃，
+    // 在请求状态时向后链节点请求，可以向全部节点请求状态
     public  List <Host> copyBackChain(Host leader){
         //如果有后链的话
         //没有后链，则返回leader逻辑链的尾节点
@@ -532,6 +550,7 @@ public class Membership {
         return result;
     }
 
+    //   新加入节点要复制对集群中的状态复制：成员列表  前链后链  哪些节点移除
     //这里不需要改变，因为调用这个方法的是刚加入节点向全体广播 joinsuccessMsg,用这个方法
     //得到全体成员
     public List<Host> shallowCopy() {
@@ -547,7 +566,7 @@ public class Membership {
     }
     
     
-    //TODO 对于要删除节点是否也要复制
+    //对于要删除节点是否也要复制
     //对新加入节点的对集群的节点信息以及前链节点进行拷贝
     public Pair<List<Host>,Map<Host,Boolean>> deepCopy(){
         return new MutablePair<>(new ArrayList<>(members),new HashMap<>(frontedChainNode));

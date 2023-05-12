@@ -907,7 +907,8 @@ public class TPOChainProto extends GenericProtocol {
         //标记leader发送到下一个节点到哪了
         lastAcceptSentCl = highestAcceptedInstanceCL;
 
-        
+        //TODO  若在之前的命令中就有要删除节点
+        //   现在再对其删除，是不是应该进行判定，当leader删除节点不存在系统中，则跳过此条消息
         /**
          * 对集群中不能连接的节点进行删除
          */
@@ -934,7 +935,7 @@ public class TPOChainProto extends GenericProtocol {
         while ((nextOp = waitingAppOps.poll()) != null) {
             sendNextAccept(nextOp);
         }
-
+        //TODO 还有其他候选者节点存储的消息
     }
     
     /**
@@ -1299,7 +1300,7 @@ public class TPOChainProto extends GenericProtocol {
      * */
     private void sendNextAccept(PaxosValue val) {
         assert supportedLeader().equals(self) && amQuorumLeader;
-
+        
         InstanceState instance = globalinstances.computeIfAbsent(lastAcceptSentCl + 1, InstanceState::new);
         assert instance.acceptedValue == null && instance.highestAccept == null;
 
@@ -1461,6 +1462,30 @@ public class TPOChainProto extends GenericProtocol {
 
     }
 
+    
+    
+    /**
+     * leader接收ack信息，对实例进行ack
+     * */
+    private void uponAcceptAckMsg(AcceptAckMsg msg, Host from, short sourceProto, int channel) {
+        //logger.debug(msg + " - " + from);
+        if (msg.instanceNumber <= highestAcknowledgedInstanceCl) {
+            logger.warn("Ignoring acceptAck for old instance: " + msg);
+            return;
+        }
+
+        //TODO never happens?
+        InstanceState inst = globalinstances.get(msg.instanceNumber);
+        if (!amQuorumLeader || !inst.highestAccept.getNode().equals(self)) {
+            logger.error("Received Ack without being leader...");
+            throw new AssertionError("Received Ack without being leader...");
+        }
+
+        if (inst.acceptedValue.type != PaxosValue.Type.NO_OP)
+            lastAcceptTimeCl = 0; //Force sending a NO-OP (with the ack)
+
+        ackInstance(msg.instanceNumber);
+    }
 
     /**
      * 对于ack包括以前的消息执行
@@ -1490,41 +1515,19 @@ public class TPOChainProto extends GenericProtocol {
     }
 
     
-    /**
-     * leader接收ack信息，对实例进行ack
-     * */
-    private void uponAcceptAckMsg(AcceptAckMsg msg, Host from, short sourceProto, int channel) {
-        //logger.debug(msg + " - " + from);
-        if (msg.instanceNumber <= highestAcknowledgedInstanceCl) {
-            logger.warn("Ignoring acceptAck for old instance: " + msg);
-            return;
-        }
-
-        //TODO never happens?
-        InstanceState inst = globalinstances.get(msg.instanceNumber);
-        if (!amQuorumLeader || !inst.highestAccept.getNode().equals(self)) {
-            logger.error("Received Ack without being leader...");
-            throw new AssertionError("Received Ack without being leader...");
-        }
-
-        if (inst.acceptedValue.type != PaxosValue.Type.NO_OP)
-            lastAcceptTimeCl = 0; //Force sending a NO-OP (with the ack)
-
-        ackInstance(msg.instanceNumber);
-    }
-
-
-    
     
     
     //TODO 一个命令可以回复客户端，只有在它以及它之前所有实例被ack时，才能回复客户端
-    //TODO 执行命令,需要确保当一个命令执行时，它之前的命令必须已经执行  
-    // 所以不是同步的，所以有时候可能
+    // 这是分布式系统的要求，因为原程序已经隐含了这个条件，通过判断出队列结构，FIFO，保证一个batch执行了，那么
+    // 它之前的batch也执行了
+    
     //TODO 只有一个实例的排序消息和分发消息都到齐了，才能进行执行
-    // 所以每次分发消息或 排序消息达到执行要求后，对之前的消息进行扫描，达到命令执行的要求
-    // 即(分发和排序消息全部到齐之后)进行执行
-    // 这里也包括了GC(垃圾收集)
-    // 垃圾收集 既对局部日志GC也对全局日志进行GC
+    // 所以不是同步的，所以有时候可能稍后延迟，需要两者齐全
+    // 所以每次分发消息或 排序消息达到执行要求后，都要对从
+    // 全局日志的已经ack到当前decided之间的消息进行扫描，达到命令执行的要求
+    
+    // TODO 这里也包括了GC(垃圾收集)模块
+    //   垃圾收集 既对局部日志GC也对全局日志进行GC，即是使用对应数据结构的remove方法
     private void execute(){
         //
         //TODO从

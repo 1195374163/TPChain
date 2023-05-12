@@ -318,7 +318,9 @@ public class TPOChainFront extends FrontendProto {
     protected void onExecuteRead(ExecuteReadReply not, short from) {
         /*
          * ExecuteReadReply是这个new ExecuteReadReply(v, ins.iN)
-         * */
+         * 读是能挂载多个读请求的，
+         * 读是不传播在其他节点的
+         */
         not.getBatchIds().forEach(bId -> {
             Pair<Long, List<byte[]>> ops = pendingReads.poll();
             if (ops == null || !ops.getKey().equals(bId)) {
