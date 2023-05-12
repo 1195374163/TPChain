@@ -1,7 +1,7 @@
 package TPOChain.utils;
 
 //主要用来对节点执行前链节点的分发命令情况做标记，由节点自动管理
-//每个
+//TODO  新加入的节点要保存一份这个，还要生成一份局部日志
 public class RuntimeConfigure {
     public RuntimeConfigure(){}
     
@@ -18,9 +18,8 @@ public class RuntimeConfigure {
     public int highestAcknowledgedInstance = -1;
     
     
-//    //这个参数不需要吧:因为这个类主要在
-//    /**
-//     * 标记每个节点的accptCl
-//     * */
-//    public int   acceptedupcl=-1;
+    
+    // todo 主要后链链尾用来定时向命令的coommandleader发送ack信息
+    // 节点在收到这个节点的分发消息的时间
+    public long lastAcceptTime=0;
 }
