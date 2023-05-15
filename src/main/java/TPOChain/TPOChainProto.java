@@ -131,6 +131,7 @@ public class TPOChainProto extends GenericProtocol {
     
     //todo  
     // 新加入节点也要 申请一份局部日志 和他的 局部日志表
+    // 先判断是否已经存在：出现这种情况是 被删除节点重新加入集群
     
     
     //todo 在leader宕机时，只是前链节点转发新的消息不能进行，老消息可以继续进行
@@ -1160,21 +1161,19 @@ public class TPOChainProto extends GenericProtocol {
         
         if (nextOkFront!=null && nextOkFront.equals(op.affectedHost)){
             nextOkFront=membership.nextLivingInFrontedChain(self);
-            if (nextOkFront !=null)
-        }
-        if (nextOkBack !=null && nextOkBack.equals(op.affectedHost)){}else {
-            nextOkBack=membership.nextLivingInBackChain(self);
-            if (nextOkBack !=null){
-                
-            }else {}
-        }
-        
-        if (nextOkFront.equals(op.affectedHost) || nextOkBack.equals(op.affectedHost)) {
-            nextOkCl = membership.nextLivingInChain(self);
-            //对ack序号信息进行到accpt序号信息进行重新转发
+            // 排序
             for (int i = highestAcknowledgedInstanceCl + 1; i < inst.iN; i++) {
-                forwardCL(globalinstances.get(i));
+                forwardCL(  .get(i));
             }
+                forwardCL(globalinstances.get(inst.iN));
+            //Map<Host,Map<Integer, InstanceState>> instances
+            for ()
+            hostConfigureMap.get();
+            
+        }
+        if (nextOkBack !=null && nextOkBack.equals(op.affectedHost)){
+            nextOkBack=membership.nextLivingInBackChain(self);
+            forward();
         }
     }
 
@@ -1205,7 +1204,7 @@ public class TPOChainProto extends GenericProtocol {
                     throw new AssertionError("Last living in chain cannot decide. " +
                             "Are f+1 nodes dead/inRemoval? " + inst.counter);
                 }
-                sendMessage(new AcceptAckMsg(inst.iN), target);
+                sendMessage(new AcceptAckCLMsg(inst.iN), target);
             } else { //not last in chain...
                 AcceptMsg msg = new AcceptMsg(inst.iN, inst.highestAccept, inst.counter, inst.acceptedValue,
                         highestAcknowledgedInstanceCl);
