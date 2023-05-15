@@ -67,7 +67,7 @@ public class Membership {
         for (HashMap.Entry<Host, Boolean> entry : frontedChainNode.entrySet()) {
             Host key = entry.getKey();
             Boolean value = entry.getValue();
-            if (value.equals(Boolean.TRUE)){
+            if (value.equals(Boolean.TRUE)){//是前链节点
                 frontChainNode.add(key);
             }
         }
@@ -163,7 +163,7 @@ public class Membership {
     public Host nextLivingInFrontedChain(Host myHost) {
         assert contains(myHost);
         
-        //当 当前节点为后链节点时返回null
+        // 当前节点为后链节点时返回null
         if (frontedChainNode.get(myHost).equals(Boolean.FALSE)){
             return null;
         }
@@ -195,16 +195,25 @@ public class Membership {
         //特殊判定：如果是前链节点，后链的首节点一定是它的nextBackChainNode
         if (frontedChainNode.get(myHost).equals(Boolean.TRUE)){
             Host temp=getBackChainHead();
-            return temp;
+            return temp;//这个可能返回null 意味着没有后链节点了
         }
         
+        //应该在链尾节点终止
         //后面是后链节点的流程
+        Host tail=getBackChainTail();
+        if (myHost.equals(tail)){//后链链尾的下一个节点是null;
+            return null;
+        }
+        
         int nextIndex = (indexOf(myHost) + 1) % members.size();
         Host nextHost = members.get(nextIndex);
         //当是 前链 或者  标记节点中包括此节点 ，下一次循环
         while (frontedChainNode.get(nextHost).equals(Boolean.TRUE) || pendingRemoval.contains(nextHost)) {
             nextIndex = (nextIndex + 1) % members.size();
             nextHost = members.get(nextIndex);
+            if (nextHost.equals(tail)){
+                return  nextHost;
+            }
         }
         return nextHost;
     }
@@ -293,7 +302,7 @@ public class Membership {
             if (frontedChainNode.get(temp).equals(Boolean.FALSE) && !pendingRemoval.contains(temp))
                 return temp;
         }
-        return null;//不应该到这
+        return null;//没有链尾
     }
     
     

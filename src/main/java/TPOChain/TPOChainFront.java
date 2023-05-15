@@ -168,6 +168,9 @@ public class TPOChainFront extends FrontendProto {
     
     //TODO 这里不用发送到leader处理,需要发送到前链节点
     //  要不每个后链每个节点都绑定一个前链节点？
+    
+    // todo 原协议在转发到leader后怎么处理的  
+    
     // 
     /**
      * 将写信息转发至writeTo即leader处理
@@ -178,7 +181,7 @@ public class TPOChainFront extends FrontendProto {
     }
 
     
-
+    
     /**
      * 连接下层的通道 将消息转发给下层的协议层
      * 只传递写的batch信息到protocol层 发送 TPOChainProto的submitBatchRequest
