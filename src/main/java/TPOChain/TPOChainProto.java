@@ -1159,21 +1159,62 @@ public class TPOChainProto extends GenericProtocol {
         // 后链节点非链尾的话  nextOkFront为空  nextOkBack不为空
         // 后链链尾的话，nextOkFront  nextOkBack 都为空
         
+        
+        //一个节点故障只会影响nextOkFront   nextOkBack 其中之一，不会两个都影响
+        
+        // 下面节点只在前链非leader触发
+        // 对当前之前的消息进行转发，不包含当前信息，因为之后的forward会对当前的消息进行转发
         if (nextOkFront!=null && nextOkFront.equals(op.affectedHost)){
             nextOkFront=membership.nextLivingInFrontedChain(self);
-            // 排序
+            // 对排序信息进行重发
+            // 为什么是ack+1 开始，因为若ack序号的信息没有发往下一个节点，
+            // 就不会有对应节点的ack信息
             for (int i = highestAcknowledgedInstanceCl + 1; i < inst.iN; i++) {
-                forwardCL(  .get(i));
+                forwardCL(globalinstances.get(i));
             }
-                forwardCL(globalinstances.get(inst.iN));
+            // 对分发消息进行重发
             //Map<Host,Map<Integer, InstanceState>> instances
-            for ()
-            hostConfigureMap.get();
+            // 局部配置表 hostConfigureMap.get();
+            Iterator<Map.Entry<Host, Map<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
+            while (outerIterator.hasNext()) {
+                // 获取外层 Map 的键值对
+                Map.Entry<Host, Map<Integer, InstanceState>> outerEntry = outerIterator.next();
+                Host host = outerEntry.getKey();
+                Map<Integer, InstanceState> innerMap = outerEntry.getValue();
+                //System.out.println("Host: " + host);
+                for (int i = hostConfigureMap.get(host).highestAcknowledgedInstance + 1; i <=  hostConfigureMap.get(host).highestAcceptedInstance ; i++) {
+                    forward(instances.get(host).get(i));
+                }
+            }
             
+            //因为
+            nextOkBack=membership.nextLivingInBackChain(self);
         }
+        //下面在后链链首 后链中间节点  后链链尾  
         if (nextOkBack !=null && nextOkBack.equals(op.affectedHost)){
             nextOkBack=membership.nextLivingInBackChain(self);
-            forward();
+            //
+            
+            // 对排序信息进行重发
+            // 为什么是ack+1 开始，因为若ack序号的信息没有发往下一个节点，
+            // 就不会有对应节点的ack信息
+            for (int i = highestAcknowledgedInstanceCl + 1; i < inst.iN; i++) {
+                forwardCL(globalinstances.get(i));
+            }
+            // 对分发消息进行重发
+            //Map<Host,Map<Integer, InstanceState>> instances
+            // 局部配置表 hostConfigureMap.get();
+            Iterator<Map.Entry<Host, Map<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
+            while (outerIterator.hasNext()) {
+                // 获取外层 Map 的键值对
+                Map.Entry<Host, Map<Integer, InstanceState>> outerEntry = outerIterator.next();
+                Host host = outerEntry.getKey();
+                Map<Integer, InstanceState> innerMap = outerEntry.getValue();
+                //System.out.println("Host: " + host);
+                for (int i = hostConfigureMap.get(host).highestAcknowledgedInstance + 1; i <=  hostConfigureMap.get(host).highestAcceptedInstance ; i++) {
+                    forward(instances.get(host).get(i));
+                }
+            }
         }
     }
 
@@ -1186,7 +1227,32 @@ public class TPOChainProto extends GenericProtocol {
             logger.error("Received accept from removed node (?)");
             throw new AssertionError("Received accept from removed node (?)");
         }
+        
+        if (nextOkFront==null && nextOkBack==null) { //am last
+            //If last in chain than we must have decided (unless F+1 dead/inRemoval)
+            if (inst.counter < QUORUM_SIZE) {
+                logger.error("Last living in chain cannot decide. Are f+1 nodes dead/inRemoval? "
+                        + inst.counter);
+                throw new AssertionError("Last living in chain cannot decide. " +
+                        "Are f+1 nodes dead/inRemoval? " + inst.counter);
+            }
+            sendMessage(new AcceptAckCLMsg(inst.iN), supportedLeader());
+        } else { 
+            if (inst.counter < QUORUM_SIZE){
+                //not last in chain...
+                AcceptCLMsg msg = new AcceptCLMsg(inst.iN, inst.highestAccept, inst.counter, inst.acceptedValue,
+                        highestAcknowledgedInstanceCl);
+                sendMessage(msg, nextOkFront);
+            }
+            else {
+                //not last in chain...
+                AcceptCLMsg msg = new AcceptCLMsg(inst.iN, inst.highestAccept, inst.counter, inst.acceptedValue,
+                        highestAcknowledgedInstanceCl);
+                sendMessage(msg, nextOkBack);
+            }
 
+        }
+        
         Iterator<Host> targets = membership.nextNodesUntil(self, nextOkCl);
         while (targets.hasNext()) {
             Host target = targets.next();
@@ -1301,7 +1367,7 @@ public class TPOChainProto extends GenericProtocol {
             closeConnection(target);
         } else if (o.opType == MembershipOp.OpType.ADD) {
             logger.info("Added to membership: " + target + " in inst " + instance.iN);
-            // 这里虽然用到了
+            // 这里虽然指定了添加位置，但其实不用
             membership.addMember(target, o.position);
             triggerMembershipChangeNotification();
             // TODO 对next  重新赋值 
@@ -1335,11 +1401,10 @@ public class TPOChainProto extends GenericProtocol {
      *在当前节点是leader时处理，发送 或成员管理 或Noop 或App_Batch信息
      * */
     private void sendNextAccept(PaxosValue val) {
-        assert supportedLeader().equals(self) && amQuorumLeader;
         // instances是下面这个数据结构
         //Map<Host,Map<Integer, InstanceState>> instances = new HashMap<>(INITIAL_MAP_SIZE);
         
-        //hostConfigureMap是每个节点的参数 
+        //hostConfigureMap是每个节点对对应commandleader的接受日志情况 
         //hostConfigureMap.get(self).lastAcceptSent+1
         InstanceState instance = instances.get(self).computeIfAbsent(hostConfigureMap.get(self).lastAcceptSent+1, InstanceState::new);
         assert instance.acceptedValue == null && instance.highestAccept == null;
@@ -1411,7 +1476,7 @@ public class TPOChainProto extends GenericProtocol {
             assert hostConfigureMap.get(self).highestAcceptedInstance == instance.iN;
         }
         
-
+        
         forward(instance);//转发下一个节点
 
         if (!instance.isDecided() && instance.counter >= QUORUM_SIZE) //We have quorum!

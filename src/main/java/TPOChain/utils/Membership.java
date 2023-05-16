@@ -425,25 +425,27 @@ public class Membership {
     //在删除操作时，先进行标记，后进行删除
     //若删除的是前链节点，需要将后链首节点与要删除的节点互换位置
     public void addToPendingRemoval(Host affectedHost) {
+        // 被删除节点是前链的话
         if(frontedChainNode.get(affectedHost).equals(Boolean.TRUE)){
             Host backChainHead =getBackChainHead();
+            if (backChainHead==null){// 没有节点备选作为前链节点，
+                logger.error("Not enough nodes to continue. Current nodes: " + members.size() +
+                        "; 同时没有给前链节点补充了;min nodes: " + MIN_QUORUM_SIZE);
+                throw new AssertionError("Not enough nodes to continue. Current nodes: " + members.size() +
+                        "; min nodes: " + MIN_QUORUM_SIZE);
+            }
             int indexbackChainHead=indexOf(backChainHead);
             int indexaffectedHost=indexOf(affectedHost);
-            
             //对两个节点的前链的标志位进行更改 
             frontedChainNode.put(affectedHost,Boolean.FALSE);
             frontedChainNode.put(backChainHead,Boolean.TRUE);
-            
-            
             //交换位置
             Collections.swap(members, indexbackChainHead, indexaffectedHost);
-            
             indexMap.clear();//索引的缓存清空
         }else{//删除的是后链节点
             //不处理
         }
-        
-        //不管是前链还是后链，都要将
+        //不管是前链还是后链，都要将受影响节点加入 待移除列表中
         boolean add = pendingRemoval.add(affectedHost);
         assert add;
     }
