@@ -14,41 +14,27 @@ public class AcceptAckCLMsg extends ProtoMessage {
     //全局顺序
     public final int instanceNumber;
 
-    //二元组 标识哪个节点的第几个序号
-    public final Host node;
-    public final int iN;
     
-    
-
-
-    public AcceptAckCLMsg(int instanceNumber,Host node,int iN) {
+    public AcceptAckCLMsg(int instanceNumber) {
         super(MSG_CODE);
         this.instanceNumber = instanceNumber;
-        this.node=node;
-        this.iN=iN;
     }
 
     @Override
     public String toString() {
         return "AcceptAckCLMsg{" +
                 "instanceNumber=" + instanceNumber +
-                "node=" + node +
-                "iN=" + iN +
                 '}';
     }
 
     public static ISerializer<? extends ProtoMessage> serializer = new ISerializer<AcceptAckCLMsg>() {
         public void serialize(AcceptAckCLMsg msg, ByteBuf out) throws IOException {
             out.writeInt(msg.instanceNumber);
-            Host.serializer.serialize(msg.node,out);
-            out.writeInt(msg.iN);
         }
 
         public AcceptAckCLMsg deserialize(ByteBuf in) throws IOException {
             int instanceNumber = in.readInt();
-            Host t=Host.serializer.deserialize(in);
-            int iN = in.readInt();
-            return new AcceptAckCLMsg(instanceNumber,t,iN);
+            return new AcceptAckCLMsg(instanceNumber);
         }
     };
 }
