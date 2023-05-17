@@ -962,7 +962,7 @@ public class TPOChainProto extends GenericProtocol {
         if (amQuorumLeader) {
             assert waitingAppOps.isEmpty() && waitingMembershipOps.isEmpty();
             if (System.currentTimeMillis() - lastAcceptTimeCl > NOOP_SEND_INTERVAL)
-                sendNextAccept(new NoOpValue());
+                sendNextAcceptCL(new NoOpValue());
         } else {
             logger.warn(timer + " while not quorumLeader");
             cancelTimer(noOpTimerCL);
@@ -979,7 +979,7 @@ public class TPOChainProto extends GenericProtocol {
     
     //TODO  
     
-    
+    // 下面这些功能在设置leader处实现
     /**
      * 成为前链节点，这里不应该有cl后缀
      * */
@@ -1002,9 +1002,8 @@ public class TPOChainProto extends GenericProtocol {
      * */
     private void onFlushMsgTimer(FlushMsgTimer timer, long timerId) {
         if (amFrontedNode) {
-            assert waitingAppOps.isEmpty() && waitingMembershipOps.isEmpty();
-            if (System.currentTimeMillis() - lastAcceptTimeCl > NOOP_SEND_INTERVAL)
-                sendNextAcceptCL(new NoOpValue());
+            if (System.currentTimeMillis() - lastSendTime > NOOP_SEND_INTERVAL)
+                sendNextAccept(new NoOpValue());
         } else {
             logger.warn(timer + " while not FrontedChain");
             cancelTimer(frontflushMsgTimer);
@@ -1309,9 +1308,12 @@ public class TPOChainProto extends GenericProtocol {
         highestDecidedInstanceCl++;
         //Actually execute message
         logger.debug("Decided: " + instance.iN + " - " + instance.acceptedValue);
+        
         if (instance.acceptedValue.type == PaxosValue.Type.APP_BATCH) {
-            if (state == TPOChainProto.State.ACTIVE)
+            execute(instance);
+            if (state == TPOChainProto.State.ACTIVE){
                 triggerNotification(new ExecuteBatchNotification(((AppOpBatch) instance.acceptedValue).getBatch()));
+            }
             else  //在节点处于加入join之后，暂存存放的命令
                 bufferedOps.add((AppOpBatch) instance.acceptedValue);
         } else if (instance.acceptedValue.type == PaxosValue.Type.MEMBERSHIP) {
@@ -1642,41 +1644,64 @@ public class TPOChainProto extends GenericProtocol {
     
     
     //todo 怎么使用 ，由排序和分发执行
+    // 
     //排序  
-    private void execute(int decide){
+    //todo  在外面包含这个逻辑
+    private boolean execute(InstanceStateCL instance){
         //在全局日志中既包含了成员管理  no_op  也包含了 排序信息
         //判断类型
-        globalinstances.get(decide).acceptedValue.type
-                
-                
-                
-        //Map<Integer, InstanceStateCL> globalinstances
-        if (globalinstances.get(i))
-        
-        for (int i= highestExecuteInstanceCl+1;i<= decide;i++){
-            InstanceStateCL execute=globalinstances.get(i);
-            SortValue temp=(SortValue)execute.acceptedValue;
-            if(instances.get(temp.getNode()).get(temp.getiN())!=null){
-                
-            }else{
-                return ;
+        int decide=instance.iN;
+        if(instance.acceptedValue.type  == PaxosValue.Type.SORT){
+            SortValue sortTarget= (SortValue)globalinstances.get(decide).acceptedValue;
+            Host target=sortTarget.getNode();
+            int  iNtarget=sortTarget.getiN();
+            InstanceState ins= instances.get(target).get(iNtarget);
+            if (ins==null){
+                return false;
+            }// 接下来是存在
+            if (state == TPOChainProto.State.ACTIVE)
+                triggerNotification(new ExecuteBatchNotification(((AppOpBatch) ins.acceptedValue).getBatch()));
+            else
+                bufferedOps.add((AppOpBatch) ins.acceptedValue);
+            
+            
+            
+            if (instances.get(self).get(decide).acceptedValue.type== PaxosValue.Type.APP_BATCH){
+                for (int i= highestExecuteInstanceCl+1;i<= decide;i++){
+                    InstanceStateCL execute=globalinstances.get(i);
+                    SortValue temp=(SortValue)execute.acceptedValue;
+                    if(instances.get(temp.getNode()).get(temp.getiN())!=null){
+                    }else{return ;}
+                }
+            }else if (instances.get(self).get(decide).acceptedValue.type != PaxosValue.Type.NO_OP){
+                logger.error("Trying to execute unknown paxos value: " + instance.acceptedValue);
+                throw new AssertionError("Trying to execute unknown paxos value: " + instance.acceptedValue);
             }
-        }
-        
+        }else if(instance.acceptedValue.type  == PaxosValue.Type.MEMBERSHIP){
+            //
+            MembershipOp membershipOp=(MembershipOp)globalinstances.get(decide).acceptedValue;
+            if (membershipOp.opType==MembershipOp.OpType.ADD){
                 
+            }else if (membershipOp.opType==MembershipOp.OpType.REMOVE){
+                
+            }
+        }else if (instance.acceptedValue.type  == PaxosValue.Type.NO_OP){
+            // 进行了时间
+            lastLeaderOp=System.currentTimeMillis();
+        }else {
+            logger.info("非类别，错误");
+        }
+        //Map<Integer, InstanceStateCL> globalinstances
         // 接下来是执行
         //TODO  需要等待排序命令一块到达才可以执行
-        if (instance.acceptedValue.type == PaxosValue.Type.APP_BATCH) {
-            if (state == TPOChainProto.State.ACTIVE)
-                triggerNotification(new ExecuteBatchNotification(((AppOpBatch) instance.acceptedValue).getBatch()));
-            else
-                bufferedOps.add((AppOpBatch) instance.acceptedValue);
-        } else if (instance.acceptedValue.type != PaxosValue.Type.NO_OP) {
-            logger.error("Trying to execute unknown paxos value: " + instance.acceptedValue);
-            throw new AssertionError("Trying to execute unknown paxos value: " + instance.acceptedValue);
-        }
+        return false;
     }
 
+    
+    
+    
+    
+    
     
     //Notice
     //GC回收
