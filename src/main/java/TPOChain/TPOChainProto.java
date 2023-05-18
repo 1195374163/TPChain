@@ -1404,13 +1404,13 @@ public class TPOChainProto extends GenericProtocol {
             }
             sendMessage(new AcceptAckCLMsg(inst.iN), supportedLeader());
         } else { 
-            if (inst.counter < QUORUM_SIZE){// 投票数不满F+1，发往nextOkFront
+            //membership.get
+            if (inst.counter < QUORUM_SIZE   ){// 投票数不满F+1，发往nextOkFront
                 //not last in chain...
                 AcceptCLMsg msg = new AcceptCLMsg(inst.iN, inst.highestAccept, inst.counter, inst.acceptedValue,
                         highestAcknowledgedInstanceCl);
                 sendMessage(msg, nextOkFront);
-            }
-            else {// 投票数大于等于F+1，发往nextOkBack
+            } else {// 投票数大于等于F+1，发往nextOkBack
                 //若后链节点为空，则说明到链尾，发送ack信息
                 if (nextOkBack==null){
                     sendMessage(new AcceptAckCLMsg(inst.iN), supportedLeader());

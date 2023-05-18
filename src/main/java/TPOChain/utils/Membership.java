@@ -12,20 +12,25 @@ public class Membership {
 
     private static final Logger logger = LogManager.getLogger(Membership.class);
     
-    
+    // TODO: 2023/5/18 这里可以将链分为两个链 
     //节点之间有序 存放了系统中的节点
     //以这个为主，附加一个hashmap，显示这个节点是前链还是后链，
     //同时附加一个标记hashmap显示这个节点是标记删除的吗
+    
+    // 总链：前链和后链拼接
     private final List<Host> members;
     
+    //前链
+    private  List<Host>  frontChain;
+    
+    // 后链
+    private  List<Host>  backChain;
     
     
     //作为缓存，存放元素的索引位置
     private final Map<Host, Integer> indexMap;
     
     
-    //所有节点在前链的标识，true标识前链，false标识后链
-    private  final   Map<Host,Boolean> frontedChainNode;
     
     //对于要删除的节点，还保留着原来在list中的位置，并且将其纳入pendingRemoval集合
     //在查询得到下一个节点要跳过这个节点
@@ -44,78 +49,34 @@ public class Membership {
     public Membership(List<Host> initial, int MIN_QUORUM_SIZE) {
         this.MIN_QUORUM_SIZE = MIN_QUORUM_SIZE;
         members = new ArrayList<>(initial);
+        frontChain=new ArrayList<Host>();
+        backChain=new ArrayList<Host>();
+        for (int i = 0; i < initial.size(); i++) {
+            if (i<MIN_QUORUM_SIZE){
+                frontChain.add(members.get(i));
+            }else {
+                backChain.add(members.get(i));
+            }
+        }
         indexMap = new HashMap<>();
-        // 初始时，对前链节点进行初始化，以顺序作为默认条件，前F+1个节点为
-        // 前链节点
-        frontedChainNode = new HashMap<>();
-        int i=0;
-        for (Host temp : initial) {
-            if(i<MIN_QUORUM_SIZE){//为前链
-                //frontedChainNode.put(temp,Boolean.TRUE); 
-                //上面这句代码等价于下面这句代码
-                setFrontChainNode(temp);
-            }else{//为后链
-                //frontedChainNode.put(temp,Boolean.FALSE);
-                //上面这句代码等价于下面这句代码
-                cancelFrontChainNode(temp);
-            }
-            i++;
-        }
-        
-        //调试输出前链节点
-        List<Host> frontChainNode=new ArrayList();
-        for (HashMap.Entry<Host, Boolean> entry : frontedChainNode.entrySet()) {
-            Host key = entry.getKey();
-            Boolean value = entry.getValue();
-            if (value.equals(Boolean.TRUE)){//是前链节点
-                frontChainNode.add(key);
-            }
-        }
-        logger.warn("前链节点 " + frontChainNode.toString());
-        
-        
         pendingRemoval = new HashSet<>();
+        checkFrontSizeAgainstQUORUM();
         //logger.info("New " + this);
         checkSizeAgainstMaxFailures();
     }
     
-    //TODO 新加入节点根据拿来的消息进行初始话自己的集群列表
-    //新加入节点根据状态进行对集群全部节点以及节点的状态的恢复
-    public  Membership(Pair<List<Host>, Map<Host,Boolean>> mem,int MIN_QUORUM_SIZE){
-        this.MIN_QUORUM_SIZE = MIN_QUORUM_SIZE;
-        members = new ArrayList<>(mem.getLeft());
-        indexMap = new HashMap<>();
-
-        frontedChainNode = mem.getRight();
-        
-        //调试输出前链节点
-        List<Host> frontChainNode=new ArrayList();
-        for (HashMap.Entry<Host, Boolean> entry : frontedChainNode.entrySet()) {
-            Host key = entry.getKey();
-            Boolean value = entry.getValue();
-            if (value.equals(Boolean.TRUE)){
-                frontChainNode.add(key);
-            }
-        }
-        logger.warn("前链节点 " + frontChainNode.toString());
-
-
-        pendingRemoval = new HashSet<>();
-        //logger.info("New " + this);
-        checkSizeAgainstMaxFailures();
-    }
     
     //TODO join节点使用：复制集群中节点及其状态
-    public Membership(List<Host> initial, Map<Host,Boolean> fronted,Set<Host> remove ,int quorum){
+    public Membership(List<Host> initial,Set<Host> remove,int quorum){
         members = new ArrayList<>(initial);
         indexMap = new HashMap<>();
         this.MIN_QUORUM_SIZE = quorum;
-        frontedChainNode= new HashMap<>(fronted);
         pendingRemoval = new HashSet<>(remove);
+        checkFrontSizeAgainstQUORUM();
         checkSizeAgainstMaxFailures();
     }
-    
-    
+
+    // TODO: 2023/5/18 是放过对删除节点的刨除还是不减少标记节点的，最后收集的投票数小于F+1，直接程序退出 
     
     /**
      *确定当前节点数小于MIN_QUORUM_SIZE的系统最终节点数 则终止系统
@@ -128,27 +89,19 @@ public class Membership {
                     "; min nodes: " + MIN_QUORUM_SIZE);
         }
     }
-
-
+    
     /**
      * 检测前段节点是否为QUORUM  F+1
      * */
-    public  boolean checkFrontedChainIsQUORUM(){
-        int frontedNodeSum=0;
-        checkSizeAgainstMaxFailures();
-        for (Map.Entry<Host, Boolean> entry : frontedChainNode.entrySet()) {
-            Boolean value = entry.getValue();
-            if (value.equals(Boolean.TRUE)){
-                frontedNodeSum++;
-            }
-        }
-        //TODO 这里应该是相等，前链的节点应该
-        if (frontedNodeSum>=MIN_QUORUM_SIZE){
-            return true;
-        }else{//前链数少于F+1
-            return false;
+    private void checkFrontSizeAgainstQUORUM(){
+        if (frontChain.size()<MIN_QUORUM_SIZE){
+            logger.error("Not enough nodes to continue. Current nodes: " + frontChain.size() +
+                    "; min nodes: " + MIN_QUORUM_SIZE);
+            throw new AssertionError("Not enough nodes to continue. Current nodes: " + frontChain.size() +
+                    "; min nodes: " + MIN_QUORUM_SIZE);
         }
     }
+    
     
     //TODO  检测集群当前存活的节点，
     // 不需要；在链尾检测不满F+1个投票，系统会终止
