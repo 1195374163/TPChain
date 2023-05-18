@@ -1164,20 +1164,58 @@ public class TPOChainProto extends GenericProtocol {
      * */
     private void markForRemoval(InstanceStateCL inst) {
         MembershipOp op = (MembershipOp) inst.acceptedValue;
-        // TODO: 2023/5/18 考虑消息的重发：是不是所有消息都要重发，有些可能不受影响 
-        //   比如 
+        // TODO: 2023/5/18  2023年5月18日16:05:09考虑消息的重发：是不是所有消息都要重发，有些可能不受影响 
+        //   具体来说  哪一个next节点改动就转发对应的消息，不需要全部转发
         
         // 当删除节点是前链节点
         if (membership.isFrontChainNode(op.affectedHost) == Boolean.TRUE ){
             if (membership.isFrontChainNode(self) == Boolean.FALSE){//是后链
                 Host  backTail=membership.getBackChainHead();
-                if (backTail.equals(self)){//当前节点是链首
+                if (backTail.equals(self)){//当前节点是后链链首
+                    // TODO: 2023/5/18  要进行转换成前链节点标志
+                    // 标记删除节点
+                    membership.addToPendingRemoval(op.affectedHost);
+                    // 修改next节点
+                    nextOkBack=membership.nextLivingInBackChain(self);
+                    nextOkFront=membership.nextLivingInFrontedChain(self);
                     
+                    //修改成前链节点需要的操作
+                    //设置时钟
+                    leaderTimeoutTimer = setupPeriodicTimer(LeaderTimer.instance, LEADER_TIMEOUT, LEADER_TIMEOUT / 3);
+                    lastLeaderOp = System.currentTimeMillis();
+                    //标记为前段节点
+                    amFrontedNode = true;
+                    //此处有leader时，能处理事务
+                    canHandleQequest=true;
                 }else {// 当前节点是后链非链首
+                    membership.addToPendingRemoval(op.affectedHost);
                     return;
                 }
             }else{//当前节点是前链
-                
+                if (nextOkFront.equals(op.affectedHost)){//next节点正好是要被删除节点
+                    membership.addToPendingRemoval(op.affectedHost);
+                    // TODO: 2023/5/18 应该重发所有到nextOkFront的消息，对于nextOkBack 
+                    nextOkFront=membership.nextLivingInFrontedChain(self);
+                    nextOkBack=membership.nextLivingInBackChain(self);
+                    // 重发可能丢失的消息
+                    for (int i = highestAcknowledgedInstanceCl + 1; i < inst.iN; i++) {
+                        forwardCL(globalinstances.get(i));
+                    }
+                    Iterator<Map.Entry<Host, Map<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
+                    while (outerIterator.hasNext()) {
+                        // 获取外层 Map 的键值对
+                        Map.Entry<Host, Map<Integer, InstanceState>> outerEntry = outerIterator.next();
+                        Host host = outerEntry.getKey();
+                        //Map<Integer, InstanceState> innerMap = outerEntry.getValue();
+                        for (int i = hostConfigureMap.get(host).highestAcknowledgedInstance + 1; i <=  hostConfigureMap.get(host).highestAcceptedInstance; i++) {
+                            forward(instances.get(host).get(i));
+                        }
+                    }
+                }else{//不是自己的next节点
+                    //Notice 2023/5/18 对于其他不受影响的前链节点，它的nextOkBack也要发生改变 
+                    membership.addToPendingRemoval(op.affectedHost);
+                    nextOkBack=membership.nextLivingInBackChain(self);
+                }
             }
         }else {// 当删除节点是后链节点
             Host  backTail=membership.getBackChainHead();
@@ -1202,6 +1240,7 @@ public class TPOChainProto extends GenericProtocol {
                         }
                     }
                 }else {//当前节点是后链其他节点
+                    membership.addToPendingRemoval(op.affectedHost);
                     return;
                 }
             }else {//删除的不是后链链首
@@ -1228,6 +1267,7 @@ public class TPOChainProto extends GenericProtocol {
                             }
                         }
                     }else {
+                        membership.addToPendingRemoval(op.affectedHost);
                         return;
                     }
                 }
@@ -1349,6 +1389,10 @@ public class TPOChainProto extends GenericProtocol {
             logger.error("Received accept from removed node (?)");
             throw new AssertionError("Received accept from removed node (?)");
         }
+
+        
+        // FIXME: 2023/5/18 这里需要修改  不能使用满足F+1 ，才能发往下一个节点，
+        //  若一个节点故障，永远不会满足F+1,应该使用逻辑链前链是否走完
         
         if (nextOkFront==null && nextOkBack==null) { //am last 只有最理想的情况下：有后链链尾尾节点会这样
             //If last in chain than we must have decided (unless F+1 dead/inRemoval)
