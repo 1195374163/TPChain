@@ -1111,6 +1111,7 @@ public class TPOChainProto extends GenericProtocol {
                 //可以接受处理客户端的消息了
                 canHandleQequest=true;
                 frontflushMsgTimer = setupPeriodicTimer(FlushMsgTimer.instance, NOOP_SEND_INTERVAL, Math.max(NOOP_SEND_INTERVAL / 3,1));
+                lastSendTime = System.currentTimeMillis();
             }
         }
             
@@ -1420,18 +1421,24 @@ public class TPOChainProto extends GenericProtocol {
     /**-----------------------------处理节点的分发信息-------------------------------**/
     
     
-    // 在往下一个节点发送分发命令的同时，同时向leader发送请求排序的命令
-    //接下一个方法涉及消息的正常处理accpt
     
     /**
      *在当前节点是leader时处理，发送 或成员管理 或Noop 或App_Batch信息
      * */
     private void sendNextAccept(PaxosValue val) {
-        InstanceState instance = instances.get(self).computeIfAbsent(hostConfigureMap.get(self).lastAcceptSent+1, InstanceState::new);
-        assert instance.acceptedValue == null && instance.highestAccept == null;
-
-        PaxosValue nextValue;
+        RuntimeConfigure  hostSendConfigure= hostConfigureMap.get(self);
+        // 当sent标记和ack相等，说明开启新的一轮分发，要开启闹钟，同时将标记时间为当前节点
+        if (hostSendConfigure.lastAcceptSent == hostSendConfigure.highestAcknowledgedInstance){
+            frontflushMsgTimer = setupPeriodicTimer(FlushMsgTimer.instance, NOOP_SEND_INTERVAL, Math.max(NOOP_SEND_INTERVAL / 3,1));
+            lastSendTime = System.currentTimeMillis();
+        }
         
+        
+        InstanceState instance = instances.get(self).computeIfAbsent(hostSendConfigure.lastAcceptSent+1, InstanceState::new);
+        assert instance.acceptedValue == null && instance.highestAccept == null;
+        
+        
+        PaxosValue nextValue;
         if (val.type == PaxosValue.Type.APP_BATCH) {
             nextValue = val;
             //nBatches++;
@@ -1443,23 +1450,22 @@ public class TPOChainProto extends GenericProtocol {
         //对当前的生成自己的seqn,以term为期，self为标记
         // 应该不需要term，不需要term标记
         SeqN newterm=new SeqN(currentSN.getValue().getCounter(),self);
+        // 先发给自己:这里直接使用对应方法
         this.uponAcceptMsg(new AcceptMsg(instance.iN, newterm,
-                (short) 0, nextValue,hostConfigureMap.get(self).highestAcknowledgedInstance), self, this.getProtoId(), peerChannel);
-        
-        
-        //向leader发送排序请求
-        OrderMSg temp=new OrderMSg(self,instance.iN);
-        sendOrEnqueue(temp,supportedLeader());
-        
-        
-        hostConfigureMap.get(self).lastAcceptSent = instance.iN;
-        
+                (short) 0, nextValue,hostSendConfigure.highestAcknowledgedInstance), self, this.getProtoId(), peerChannel);
+
+        // 
+        hostSendConfigure.lastAcceptSent = instance.iN;
         // 上次的刷新时间
         lastSendTime = System.currentTimeMillis();
+        
+        
+        //同时向leader发送排序请求
+        OrderMSg orderMSg=new OrderMSg(self,instance.iN);
+        sendOrEnqueue(orderMSg,supportedLeader());
     }
     
     // 上面这个是前链节点转发消息需要执行的操作
-    
     
     /**
      * 处理accept信息
@@ -1471,8 +1477,10 @@ public class TPOChainProto extends GenericProtocol {
             sendMessage(new UnaffiliatedMsg(), from, TCPChannel.CONNECTION_IN);
             return;
         }
+
         
-        InstanceState instance = instances.get(self).computeIfAbsent(msg.iN, InstanceState::new);
+        Host sender=msg.sN.getNode();
+        InstanceState instance = instances.get(sender).computeIfAbsent(msg.iN, InstanceState::new);
         
         //"Discarding decided msg" 当instance
         if (instance.isDecided()) {
@@ -1488,24 +1496,24 @@ public class TPOChainProto extends GenericProtocol {
         
         //  对消息重复的还需要处理
         
-        hostConfigureMap.get(self).lastAcceptTime = System.currentTimeMillis();//进行更新领导操作时间
-        
+        hostConfigureMap.get(sender).lastAcceptTime = System.currentTimeMillis();//进行更新领导操作时间
         
         instance.accept(msg.sN, msg.value, (short) (msg.nodeCounter + 1));//进行对实例的确定
 
         //更新highestAcceptedInstance信息
-        if ( hostConfigureMap.get(self).highestAcceptedInstance < instance.iN) {
-            hostConfigureMap.get(self).highestAcceptedInstance++;
-            assert hostConfigureMap.get(self).highestAcceptedInstance == instance.iN;
+        if ( hostConfigureMap.get(sender).highestAcceptedInstance < instance.iN) {
+            hostConfigureMap.get(sender).highestAcceptedInstance++;
+            assert hostConfigureMap.get(sender).highestAcceptedInstance == instance.iN;
         }
         
         
         forward(instance);//转发下一个节点
 
+        // 前段节点没有decide ，后端节点已经decide，
         if (!instance.isDecided() && instance.counter >= QUORUM_SIZE) //We have quorum!
             decideAndExecute(instance);//决定并执行实例
 
-        ackInstance(msg.ack);//对于之前的实例进行ack并进行垃圾收集
+        ackInstance(sender,msg.ack);//对于之前的实例进行ack并进行垃圾收集
     }
 
 
@@ -1513,12 +1521,11 @@ public class TPOChainProto extends GenericProtocol {
      * 转发accept信息给下一个节点
      * */
     private void forward(InstanceState inst) {
-        //TODO some cases no longer happen (like leader being removed)
-        if (!membership.contains(inst.highestAccept.getNode())) {
-            logger.error("Received accept from removed node (?)");
-            throw new AssertionError("Received accept from removed node (?)");
-        }
-        
+        // some cases no longer happen (like leader being removed)
+        //if (!membership.contains(inst.highestAccept.getNode())) {
+        //    logger.error("Received accept from removed node (?)");
+        //    throw new AssertionError("Received accept from removed node (?)");
+        //}
         if (nextOkFront==null && nextOkBack==null) { //am last 只有最理想的情况下：有后链链尾尾节点会这样
             //If last in chain than we must have decided (unless F+1 dead/inRemoval)
             if (inst.counter < QUORUM_SIZE) {
@@ -1531,22 +1538,21 @@ public class TPOChainProto extends GenericProtocol {
         } else {
             if (inst.counter < QUORUM_SIZE){// 投票数不满F+1，发往nextOkFront
                 //not last in chain...
-                AcceptCLMsg msg = new AcceptCLMsg(inst.iN, inst.highestAccept, inst.counter, inst.acceptedValue,
-                        highestAcknowledgedInstanceCl);
+                AcceptMsg msg = new AcceptMsg(inst.iN, inst.highestAccept, inst.counter, inst.acceptedValue,
+                        hostConfigureMap.get(inst.highestAccept.getNode()).highestAcknowledgedInstance);
                 sendMessage(msg, nextOkFront);
             } else {// 投票数大于等于F+1，发往nextOkBack
                 //若后链节点为空，则说明到链尾，发送ack信息
                 if (nextOkBack==null){
-                    sendMessage(new AcceptAckCLMsg(inst.iN), inst.highestAccept.getNode());
+                    sendMessage(new AcceptAckMsg(inst.iN), inst.highestAccept.getNode());
                 }else {//有后链节点
                     //not last in chain...
-                    AcceptCLMsg msg = new AcceptCLMsg(inst.iN, inst.highestAccept, inst.counter, inst.acceptedValue,
-                            highestAcknowledgedInstanceCl);
+                    AcceptMsg msg = new AcceptMsg(inst.iN, inst.highestAccept, inst.counter, inst.acceptedValue,
+                            hostConfigureMap.get(inst.highestAccept.getNode()).highestAcknowledgedInstance);
                     sendMessage(msg, nextOkBack);
                 }
             }
         }
-        
     }
     
     
@@ -1554,80 +1560,82 @@ public class TPOChainProto extends GenericProtocol {
      * decide并执行Execute实例
      * */
     private void decideAndExecute(InstanceState instance) {
-        assert hostConfigureMap.get(self).highestDecidedInstance == instance.iN - 1;
-        assert !instance.isDecided();
+        //assert hostConfigureMap.get(self).highestDecidedInstance == instance.iN - 1;
+        //assert !instance.isDecided();
         
         instance.markDecided();
-        hostConfigureMap.get(self).highestDecidedInstance++;
+        hostConfigureMap.get(instance.highestAccept.getNode()).highestDecidedInstance++;
         // 上面是decide的，只对其进行了标记
+        //logger.debug("Decided: " + instance.iN + " - " + instance.acceptedValue);
+
         
         //Actually execute message
-        logger.debug("Decided: " + instance.iN + " - " + instance.acceptedValue);
-        
         // 接下来是执行
-        //TODO  需要等待排序命令一块到达才可以执行
-        if (instance.acceptedValue.type == PaxosValue.Type.APP_BATCH) {
-            if (state == TPOChainProto.State.ACTIVE)
-                triggerNotification(new ExecuteBatchNotification(((AppOpBatch) instance.acceptedValue).getBatch()));
-            else
-                bufferedOps.add((AppOpBatch) instance.acceptedValue);
-        } else if (instance.acceptedValue.type != PaxosValue.Type.NO_OP) {
-            logger.error("Trying to execute unknown paxos value: " + instance.acceptedValue);
-            throw new AssertionError("Trying to execute unknown paxos value: " + instance.acceptedValue);
-        }
-        
+        // TODO: 2023/5/18   需要等待排序命令一块到达才可以执行，触发一次排序命令的执行，因为
+        //  排序命令缺少分发命令停止了一些执行
+        execute();
+        //if (instance.acceptedValue.type == PaxosValue.Type.APP_BATCH) {
+        //    if (state == TPOChainProto.State.ACTIVE)
+        //        triggerNotification(new ExecuteBatchNotification(((AppOpBatch) instance.acceptedValue).getBatch()));
+        //    else
+        //        bufferedOps.add((AppOpBatch) instance.acceptedValue);
+        //} else if (instance.acceptedValue.type != PaxosValue.Type.NO_OP) {
+        //    logger.error("Trying to execute unknown paxos value: " + instance.acceptedValue);
+        //    throw new AssertionError("Trying to execute unknown paxos value: " + instance.acceptedValue);
+        //}
     }
+    
+    /**
+     * 对于ack包括以前的消息执行
+     * */
+    private void ackInstance(Host sendHost,int instanceN) {
+        // 对于前链节点先进行deccide
+        //For nodes in the first half of the chain only
+        for (int i = hostConfigureMap.get(sendHost).highestDecidedInstance + 1; i <= instanceN; i++) {
+            InstanceState ins = instances.get(sendHost).get(i);
+            //assert !ins.isDecided();
+            decideAndExecute(ins);
+            //assert highestDecidedInstanceCl == i;
+        }
 
+        //For everyone
+        for (int i = hostConfigureMap.get(sendHost).highestAcknowledgedInstance+ 1; i <= instanceN; i++) {
+            hostConfigureMap.get(sendHost).highestAcknowledgedInstance++;
+        }
+
+        // TODO: 2023/5/18 其他节点在得到noop信息之后开启一段时间，自动对noop信息进行ack 
+        //  因为noop的时钟已经关闭，
+        //   这里是接收到noop的ack信息。
+        //   在发送完一次noop消息得到他的ack消息
+        if (self.equals(sendHost) && instances.get(sendHost).get(instanceN).acceptedValue.type== PaxosValue.Type.NO_OP){
+            // 但ack赶上sent时结束闹钟 
+            if(hostConfigureMap.get(self).highestAcknowledgedInstance == hostConfigureMap.get(self).lastAcceptSent) {
+                cancelTimer(frontflushMsgTimer);
+            }
+        }
+    }
+    
     
     /**
      * leader接收ack信息，对实例进行ack
      * */
     private void uponAcceptAckMsg(AcceptAckMsg msg, Host from, short sourceProto, int channel) {
-        //logger.debug(msg + " - " + from);
-        if (msg.instanceNumber <=    highestAcknowledgedInstanceCl) {
+
+        // 这个方法只有命令的分发者才能调用
+        if (msg.instanceNumber <= hostConfigureMap.get(self).highestAcknowledgedInstance) {
             logger.warn("Ignoring acceptAck for old instance: " + msg);
             return;
         }
-
-        //TODO never happens?
-        InstanceState inst = globalinstances.get(msg.instanceNumber);
-        if (!amQuorumLeader || !inst.highestAccept.getNode().equals(self)) {
-            logger.error("Received Ack without being leader...");
-            throw new AssertionError("Received Ack without being leader...");
-        }
-
+        
+        ackInstance(self,msg.instanceNumber);
+        
+        InstanceState inst = instances.get(self).get(msg.instanceNumber);
+        // 立即发送no_op信息对消息进行确认
         if (inst.acceptedValue.type != PaxosValue.Type.NO_OP)
-            lastAcceptTimeCl = 0; //Force sending a NO-OP (with the ack)
-
-        ackInstance(msg.instanceNumber);
+            lastSendTime= 0; //Force sending a NO-OP (with the ack)
     }
 
-    /**
-     * 对于ack包括以前的消息执行
-     * */
-    private void ackInstance(int instanceN) {
-        //For nodes in the first half of the chain only
-        for (int i = hostConfigureMap.get(self).highestDecidedInstance + 1; i <= instanceN; i++) {
-            InstanceState ins = instances.get(self).get(i);
-            assert !ins.isDecided();
-            decideAndExecute(ins);
-            assert highestDecidedInstanceCl == i;
-        }
 
-        //For everyone
-        for (int i = highestAcknowledgedInstanceCl + 1; i <= instanceN; i++) {
-            /**
-             * 这里进行了垃圾收集，因为是
-             * */
-            InstanceStateCL ins = globalinstances.remove(i);
-            ins.getAttachedReads().forEach((k, v) -> sendReply(new ExecuteReadReply(v, ins.iN), k));
-
-            assert ins.isDecided();
-            //更新ack信息
-            highestAcknowledgedInstanceCl++;
-            assert highestAcknowledgedInstanceCl == i;
-        }
-    }
 
     
     
@@ -1650,7 +1658,9 @@ public class TPOChainProto extends GenericProtocol {
     // 
     //排序  
     //todo  在外面包含这个逻辑
-    private boolean execute(InstanceStateCL instance){
+    private boolean execute(){
+            InstanceStateCL instance;
+        
         //在全局日志中既包含了成员管理  no_op  也包含了 排序信息
         // 这里只筛选出 包含
         //判断类型
@@ -1666,8 +1676,7 @@ public class TPOChainProto extends GenericProtocol {
             triggerNotification(new ExecuteBatchNotification(((AppOpBatch) ins.acceptedValue).getBatch()));
         else
             bufferedOps.add((AppOpBatch) ins.acceptedValue);
-            
-            
+        
             if (instances.get(self).get(decide).acceptedValue.type== PaxosValue.Type.APP_BATCH){
                 for (int i= highestExecuteInstanceCl+1;i<= decide;i++){
                     InstanceStateCL execute=globalinstances.get(i);
@@ -1679,11 +1688,10 @@ public class TPOChainProto extends GenericProtocol {
                 logger.error("Trying to execute unknown paxos value: " + instance.acceptedValue);
                 throw new AssertionError("Trying to execute unknown paxos value: " + instance.acceptedValue);
             }
-        }
         //Map<Integer, InstanceStateCL> globalinstances
         // 接下来是执行
         //TODO  需要等待排序命令一块到达才可以执行
-        return false;
+        return ;
     }
 
     
