@@ -501,7 +501,7 @@ public class TPOChainProto extends GenericProtocol {
             instances.put(temp,ins);
         }
         //当判断当前节点是否为前链节点
-        if(membership.isFrontChainNode(self).equals(Boolean.TRUE)){
+        if(membership.frontChainContain(self)){
             frontChainNodeAction();
         } else {//成为后链节点
         }
@@ -564,7 +564,7 @@ public class TPOChainProto extends GenericProtocol {
             instances.put(temp,ins);
         }
         //当判断当前节点是否为前链节点
-        if(membership.isFrontChainNode(self).equals(Boolean.TRUE)){
+        if(membership.frontChainContain(self)){
             frontChainNodeAction();
         } else {//成为后链节点
         }
@@ -1168,8 +1168,8 @@ public class TPOChainProto extends GenericProtocol {
         //   具体来说  哪一个next节点改动就转发对应的消息，不需要全部转发
         
         // 当删除节点是前链节点
-        if (membership.isFrontChainNode(op.affectedHost) == Boolean.TRUE ){
-            if (membership.isFrontChainNode(self) == Boolean.FALSE){//是后链
+        if (membership.frontChainContain(op.affectedHost) ){
+            if (membership.frontChainContain(self) == false){//是后链
                 Host  backTail=membership.getBackChainHead();
                 if (backTail.equals(self)){//当前节点是后链链首
                     // TODO: 2023/5/18  要进行转换成前链节点标志
@@ -1220,7 +1220,7 @@ public class TPOChainProto extends GenericProtocol {
         }else {// 当删除节点是后链节点
             Host  backTail=membership.getBackChainHead();
             if (backTail.equals(op.affectedHost)){//当前删除的是后链链首
-                if (membership.isFrontChainNode(self) == Boolean.TRUE){// 当前节点是前链
+                if (membership.frontChainContain(self)){// 当前节点是前链
                     // 标记删除节点
                     membership.addToPendingRemoval(op.affectedHost);
                     // 修改next节点
@@ -1244,7 +1244,7 @@ public class TPOChainProto extends GenericProtocol {
                     return;
                 }
             }else {//删除的不是后链链首
-                if (membership.isFrontChainNode(self) == Boolean.TRUE){
+                if (membership.frontChainContain(self)){
                     return;//若当前节点是前链，不受影响
                 }else{//当前节点是后链
                     if (nextOkBack.equals(op.affectedHost)){//当next节点是要删除节点
@@ -1519,7 +1519,7 @@ public class TPOChainProto extends GenericProtocol {
         } else if (o.opType == MembershipOp.OpType.ADD) {
             logger.info("Added to membership: " + target + " in inst " + instance.iN);
             // 这里虽然指定了添加位置，但其实不用
-            membership.addMember(target, o.position);
+            membership.addMember(target);
             triggerMembershipChangeNotification();
             // TODO 对next  重新赋值
             nextOkFront=membership.nextLivingInFrontedChain(self);
@@ -1528,7 +1528,7 @@ public class TPOChainProto extends GenericProtocol {
 
             if (state == TPOChainProto.State.ACTIVE) {
                 //运行到这个方法说明已经满足大多数了
-                sendMessage(new JoinSuccessMsg(instance.iN, instance.highestAccept, membership.deepCopy()), target);
+                sendMessage(new JoinSuccessMsg(instance.iN, instance.highestAccept, membership.shallowCopy()), target);
                 assert highestDecidedInstanceCl == instance.iN;
                 //TODO need mechanism for joining node to inform nodes they can forget stored state
                 pendingSnapshots.put(target, MutablePair.of(instance.iN, instance.counter == QUORUM_SIZE));
@@ -1851,7 +1851,7 @@ public class TPOChainProto extends GenericProtocol {
             //局部日志清空
             instances.clear();
             
-            if (membership.isFrontChainNode(self)){
+            if (membership.frontChainContain(self)){
                 cancelfrontChainNodeAction();
             }else {//后链
                 
