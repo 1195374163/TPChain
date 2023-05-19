@@ -1438,13 +1438,27 @@ public class TPOChainProto extends GenericProtocol {
         //Actually execute message
         if (instance.acceptedValue.type == PaxosValue.Type.SORT) {
             if (state == TPOChainProto.State.ACTIVE){
-                for(int i=highestExecuteInstanceCl+1;i<=instance.iN;i++){
-                    boolean temp=execute(instance);
-                    if (temp== false){// 返回结果说明 有的命令分发还没结束，停止执行
-                        return;
+                highestExecuteInstanceCl;
+                highestDecidedInstanceCl;
+                //在全局日志中既包含了成员管理  no_op  也包含了 排序信息
+                // 这里只筛选出 包含
+                //判断类型
+                for (int i=highestExecuteInstanceCl+1;i<= highestDecidedInstanceCl;i++){
+                    if (globalinstances.get(i).acceptedValue.type!= PaxosValue.Type.SORT){
+                        highestExecuteInstanceCl++;
+                        //continue;
+                    }else {
+                        SortValue sortTarget= (SortValue)globalinstances.get(i).acceptedValue;
+                        Host target=sortTarget.getNode();
+                        int  iNtarget=sortTarget.getiN();
+                        // TODO: 2023/5/19 hashMap没有这个东西会不会返回null 
+                        InstanceState ins= instances.get(target).get(iNtarget);
+                        if (ins == null || ins.isDecided()==false){
+                            return ;
+                        }
+                       
                     }
                 }
-                execute(instance);
                 triggerNotification(new ExecuteBatchNotification(((AppOpBatch) instance.acceptedValue).getBatch()));
             } else  //在节点处于加入join之后，暂存存放的批处理命令
                 bufferedOps.add((SortValue) instance.acceptedValue);
@@ -1539,11 +1553,58 @@ public class TPOChainProto extends GenericProtocol {
         }
     }
 
+    
 
+    //TODO 一个命令可以回复客户端，只有在它以及它之前所有实例被ack时，才能回复客户端
+    // 这是分布式系统的要求，因为原程序已经隐含了这个条件，通过判断出队列结构，FIFO，保证一个batch执行了，那么
+    // 它之前的batch也执行了
+
+    //TODO 只有一个实例的排序消息和分发消息都到齐了，才能进行执行
+    // 所以不是同步的，所以有时候可能稍后延迟，需要两者齐全
+    // 所以每次分发消息或 排序消息达到执行要求后，都要对从
+    // 全局日志的已经ack到当前decided之间的消息进行扫描，达到命令执行的要求
+
+    // TODO 这里也包括了GC(垃圾收集)模块
+    //   垃圾收集 既对局部日志GC也对全局日志进行GC，即是使用对应数据结构的remove方法
+    //排序  
+    //todo  在外面包含这个判断逻辑
+    private void execute(){
+        //在全局日志中既包含了成员管理  no_op  也包含了 排序信息
+        // 这里只筛选出 包含
+        //判断类型
+        // TODO: 2023/5/19 i应该是从execute开始还是execute+1开始 
+        for (int i=highestExecuteInstanceCl+1;i<= highestDecidedInstanceCl;i++){
+            if (globalinstances.get(i).acceptedValue.type!= PaxosValue.Type.SORT){
+                highestExecuteInstanceCl++;
+                continue;
+            }else {
+                SortValue sortTarget= (SortValue)globalinstances.get(i).acceptedValue;
+                Host target=sortTarget.getNode();
+                int  iNtarget=sortTarget.getiN();
+                // TODO: 2023/5/19 hashMap没有这个东西会不会返回null 
+                InstanceState ins= instances.get(target).get(iNtarget);
+                if (ins == null || ins.isDecided()==false){
+                    return ;// 不能进行执行
+                }
+                if (ins.acceptedValue.type == PaxosValue.Type.NO_OP){
+                    highestExecuteInstanceCl++;
+                }else {
+                    triggerNotification(new ExecuteBatchNotification(((AppOpBatch) ins.acceptedValue).getBatch()));
+                    highestExecuteInstanceCl++; 
+                }
+            }
+        }
+    }
+
+    // TODO: 2023/5/19 对于execute到ack(不包括 ：因为有读附加在ack的实例中)的实例之间的 
+    private  void  gc(){
+         for(int i=highestExecuteInstanceCl;i < highestAcknowledgedInstanceCl;i++){}
+    }
     
     
-    
-    
+
+
+
     /**-----------------------------处理节点的分发信息-------------------------------**/
     
     
@@ -1761,69 +1822,8 @@ public class TPOChainProto extends GenericProtocol {
     }
 
 
-
     
-    
-    
-    //TODO 一个命令可以回复客户端，只有在它以及它之前所有实例被ack时，才能回复客户端
-    // 这是分布式系统的要求，因为原程序已经隐含了这个条件，通过判断出队列结构，FIFO，保证一个batch执行了，那么
-    // 它之前的batch也执行了
-    
-    //TODO 只有一个实例的排序消息和分发消息都到齐了，才能进行执行
-    // 所以不是同步的，所以有时候可能稍后延迟，需要两者齐全
-    // 所以每次分发消息或 排序消息达到执行要求后，都要对从
-    // 全局日志的已经ack到当前decided之间的消息进行扫描，达到命令执行的要求
-    
-    // TODO 这里也包括了GC(垃圾收集)模块
-    //   垃圾收集 既对局部日志GC也对全局日志进行GC，即是使用对应数据结构的remove方法
-    
-    
-    
-    //todo 怎么使用 ，由排序和分发执行
-    // 
-    //排序  
-    //todo  在外面包含这个逻辑
-    private boolean execute(){
-            InstanceStateCL instance;
-        
-        //在全局日志中既包含了成员管理  no_op  也包含了 排序信息
-        // 这里只筛选出 包含
-        //判断类型
-        int decide=instance.iN;
-        SortValue sortTarget= (SortValue)globalinstances.get(decide).acceptedValue;
-        Host target=sortTarget.getNode();
-        int  iNtarget=sortTarget.getiN();
-        InstanceState ins= instances.get(target).get(iNtarget);
-        if (ins==null){
-            return false;
-        }// 接下来是存在
-        if (state == TPOChainProto.State.ACTIVE)
-            triggerNotification(new ExecuteBatchNotification(((AppOpBatch) ins.acceptedValue).getBatch()));
-        else
-            bufferedOps.add((AppOpBatch) ins.acceptedValue);
-        
-            if (instances.get(self).get(decide).acceptedValue.type== PaxosValue.Type.APP_BATCH){
-                for (int i= highestExecuteInstanceCl+1;i<= decide;i++){
-                    InstanceStateCL execute=globalinstances.get(i);
-                    SortValue temp=(SortValue)execute.acceptedValue;
-                    if(instances.get(temp.getNode()).get(temp.getiN())!=null){
-                    }else{return ;}
-                }
-            }else if (instances.get(self).get(decide).acceptedValue.type != PaxosValue.Type.NO_OP){
-                logger.error("Trying to execute unknown paxos value: " + instance.acceptedValue);
-                throw new AssertionError("Trying to execute unknown paxos value: " + instance.acceptedValue);
-            }
-        //Map<Integer, InstanceStateCL> globalinstances
-        // 接下来是执行
-        //TODO  需要等待排序命令一块到达才可以执行
-        return ;
-    }
-
-    
-    
-    
-    
-    
+    // TODO: 2023/5/19 对于新加入节点的命令执行的标识怎么设置   decide  accept  ack  execute
     
     //Notice
     //GC回收

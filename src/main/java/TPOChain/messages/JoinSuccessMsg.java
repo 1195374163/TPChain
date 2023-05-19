@@ -21,9 +21,9 @@ public class JoinSuccessMsg extends ProtoMessage {
     public final int iN;
     public final SeqN sN;
     //public final List<Host> membership;
-    public final Pair<List<Host>, Map<Host,Boolean>> membership;
+    public final List<Host> membership;
     
-    public JoinSuccessMsg(int iN, SeqN sN, Pair<List<Host>, Map<Host,Boolean>> membership) {
+    public JoinSuccessMsg(int iN, SeqN sN,List<Host> membership) {
         super(MSG_CODE);
         this.iN = iN;
         this.sN = sN;
@@ -44,16 +44,9 @@ public class JoinSuccessMsg extends ProtoMessage {
             out.writeInt(msg.iN);
             msg.sN.serialize(out);
             
-            out.writeInt(msg.membership.getLeft().size());
-            for (Host h : msg.membership.getLeft())
+            out.writeInt(msg.membership.size());
+            for (Host h : msg.membership)
                 Host.serializer.serialize(h, out);
-            
-            //TODO 对一个Map类型进行序列化
-            out.writeInt(msg.membership.getRight().size());
-            for (Map.Entry<Host, Boolean> entry : msg.membership.getRight().entrySet()) {
-                Host.serializer.serialize(entry.getKey(), out);
-                out.writeBoolean(entry.getValue());
-            }
         }
 
         public JoinSuccessMsg deserialize(ByteBuf in) throws IOException {
@@ -65,14 +58,7 @@ public class JoinSuccessMsg extends ProtoMessage {
             for (int i = 0; i < membershipSize; i++)
                 membership.add(Host.serializer.deserialize(in));
             
-            int membershipMapSize = in.readInt();
-            Map<Host, Boolean> membershipMap = new HashMap<>(membershipMapSize);
-            for (int i = 0; i < membershipMapSize; i++) {
-                Host host = Host.serializer.deserialize(in);
-                boolean value = in.readBoolean();
-                membershipMap.put(host, value);
-            }
-            return new JoinSuccessMsg(instanceNumber, seqN, new MutablePair<>(membership,membershipMap));
+            return new JoinSuccessMsg(instanceNumber, seqN, membership);
         }
     };
 }
