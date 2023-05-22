@@ -58,7 +58,7 @@ public class TPOChainProto extends GenericProtocol {
     private final int QUORUM_SIZE;
     private final int RECONNECT_TIME;
 
-    //  Notice 对各项超时之间的依赖关系：
+    //  对各项超时之间的依赖关系：
     //   noOp_sended_timeout  leader_timeout  reconnect_timeout
     //下面是具体取值
     /**
@@ -411,7 +411,7 @@ public class TPOChainProto extends GenericProtocol {
         registerMessageHandler(peerChannel, AcceptMsg.MSG_CODE, this::uponAcceptMsg, this::uponMessageFailed);
         //新加
         registerMessageHandler(peerChannel, AcceptCLMsg.MSG_CODE, this::uponAcceptCLMsg, this::uponMessageFailed);
-        registerMessageHandler(peerChannel, DecidedMsg.MSG_CODE, this::uponDecidedMsg, this::uponMessageFailed);
+        //registerMessageHandler(peerChannel, DecidedMsg.MSG_CODE, this::uponDecidedMsg, this::uponMessageFailed);
         //新加
         registerMessageHandler(peerChannel, DecidedCLMsg.MSG_CODE, this::uponDecidedCLMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, JoinRequestMsg.MSG_CODE,
@@ -537,7 +537,7 @@ public class TPOChainProto extends GenericProtocol {
     /**
      * 新节点加入成功后 执行的方法
      * */  
-    private void setupJoinInitialState(Pair<List<Host>, Map<Host,Boolean>> members, int instanceNumber) {
+    private void setupJoinInitialState(List<Host> members, int instanceNumber) {
         //传进来的参数setupInitialState(seeds, -1);
         //这里根据传进来的顺序， 已经将前链节点和后链节点分清楚出了
         membership = new Membership(members, QUORUM_SIZE);
@@ -1453,23 +1453,26 @@ public class TPOChainProto extends GenericProtocol {
                 //在全局日志中既包含了成员管理  no_op  也包含了 排序信息
                 // 这里只筛选出 包含
                 //判断类型
-                for (int i=highestExecuteInstanceCl+1;i<= highestDecidedInstanceCl;i++){
-                    if (globalinstances.get(i).acceptedValue.type!= PaxosValue.Type.SORT){
-                        highestExecuteInstanceCl++;
-                        //continue;
-                    }else {
-                        SortValue sortTarget= (SortValue)globalinstances.get(i).acceptedValue;
-                        Host target=sortTarget.getNode();
-                        int  iNtarget=sortTarget.getiN();
-                        // TODO: 2023/5/19 hashMap没有这个东西会不会返回null 
-                        InstanceState ins= instances.get(target).get(iNtarget);
-                        if (ins == null || ins.isDecided()==false){
-                            return ;
-                        }
-                       
-                    }
-                }
-                triggerNotification(new ExecuteBatchNotification(((AppOpBatch) instance.acceptedValue).getBatch()));
+                //for (int i=highestExecuteInstanceCl+1;i<= highestDecidedInstanceCl;i++){
+                //    if (globalinstances.get(i).acceptedValue.type!= PaxosValue.Type.SORT){
+                //        highestExecuteInstanceCl++;
+                //        //continue;
+                //    }else {
+                //        SortValue sortTarget= (SortValue)globalinstances.get(i).acceptedValue;
+                //        Host target=sortTarget.getNode();
+                //        int  iNtarget=sortTarget.getiN();
+                //        //  hashMap没有这个东西会不会返回null 
+                //        InstanceState ins= instances.get(target).get(iNtarget);
+                //        if (ins == null || ins.isDecided()==false){
+                //            return ;
+                //        }
+                //       
+                //    }
+                //}
+                //triggerNotification(new ExecuteBatchNotification(((AppOpBatch) instance.acceptedValue).getBatch()));
+                /*
+                * 什么也不做等待ack()时执行相关的命令
+                * */
             } else  //在节点处于加入join之后，暂存存放的批处理命令
                 bufferedOps.add((SortValue) instance.acceptedValue);
         } else if (instance.acceptedValue.type == PaxosValue.Type.MEMBERSHIP) {
@@ -1496,22 +1499,54 @@ public class TPOChainProto extends GenericProtocol {
             decideAndExecuteCL(ins);
             assert highestDecidedInstanceCl == i;
         }
+        
+        // 进行ack信息的更新
+        // TODO: 2023/5/22 使用++ 还是直接赋值好 
+        highestAcknowledgedInstanceCl=instanceN;
+        
+        
+        // 是使用调用处循环，还是方法内部使用循环?  外部使用
+        for (int i=highestExecuteInstanceCl+1;i<= instanceN;i++){
+            if (globalinstances.get(i).acceptedValue.type!= PaxosValue.Type.SORT){
+                // 那消息可能是成员管理消息  也可能是noop消息
+                highestExecuteInstanceCl++;
+                gcAndRead(i,null,-1);
+            }else {// 是排序消息
+                SortValue sortTarget= (SortValue)globalinstances.get(i).acceptedValue;
+                Host target=sortTarget.getNode();
+                int  iNtarget=sortTarget.getiN();
+                InstanceState ins= instances.get(target).get(iNtarget);
+                if (ins == null || !ins.isDecided()){
+                    return ;// 不能进行执行,结束执行
+                }
+                // 分发消息是一个刷新消息
+                if (ins.acceptedValue.type== PaxosValue.Type.NO_OP){
+                    highestExecuteInstanceCl++;
+                    gcAndRead(i,target,iNtarget);
+                    continue;
+                }
+                
+                triggerNotification(new ExecuteBatchNotification(((AppOpBatch) ins.acceptedValue).getBatch()));
+                highestExecuteInstanceCl++;
+                gcAndRead(i,target,iNtarget);
+            }
+        }
 
-        execute(instanceN);
+       
         //先执行上面的代码，先更新状态，
-        // Fixme  因为前链节点节点
+  
         
         //For everyone
-        for (int i = highestAcknowledgedInstanceCl + 1; i <= instanceN; i++) {
-            InstanceStateCL ins = globalinstances.remove(i);//垃圾收集
-            ins.getAttachedReads().forEach((k, v) -> sendReply(new ExecuteReadReply(v, ins.iN), k));
-            assert ins.isDecided();
-            //更新ack信息
-            highestAcknowledgedInstanceCl++;
-            assert highestAcknowledgedInstanceCl == i;
-        }
+        //for (int i = highestAcknowledgedInstanceCl + 1; i <= instanceN; i++) {
+        //    InstanceStateCL ins = globalinstances.remove(i);//垃圾收集
+        //    ins.getAttachedReads().forEach((k, v) -> sendReply(new ExecuteReadReply(v, ins.iN), k));
+        //    assert ins.isDecided();
+        //    //更新ack信息
+        //    highestAcknowledgedInstanceCl++;
+        //    assert highestAcknowledgedInstanceCl == i;
+        //}
     }
-
+    
     /**
      * leader接收ack信息，对实例进行ack
      * */
@@ -1546,14 +1581,21 @@ public class TPOChainProto extends GenericProtocol {
             closeConnection(target);
         } else if (o.opType == MembershipOp.OpType.ADD) {
             logger.info("Added to membership: " + target + " in inst " + instance.iN);
-            // 这里虽然指定了添加位置，但其实不用
             membership.addMember(target);
             triggerMembershipChangeNotification();
-            // TODO 对next  重新赋值
+            //对next  重新赋值
             nextOkFront=membership.nextLivingInFrontedChain(self);
             nextOkBack=membership.nextLivingInBackChain(self);
+            
             openConnection(target);
-
+            //添加成功后，需要添加一新加节点的局部日志表 和  局部配置表
+            RuntimeConfigure runtimeConfigure=new RuntimeConfigure();
+            hostConfigureMap.put(target,runtimeConfigure);
+            //局部日志进行初始化 
+            //Map<Host,Map<Integer, InstanceState>> instances 
+            Map<Integer, InstanceState>  ins=new HashMap<>();
+            instances.put(target,ins);
+            
             if (state == TPOChainProto.State.ACTIVE) {
                 //运行到这个方法说明已经满足大多数了
                 sendMessage(new JoinSuccessMsg(instance.iN, instance.highestAccept, membership.shallowCopy()), target);
@@ -1566,7 +1608,6 @@ public class TPOChainProto extends GenericProtocol {
             }
         }
     }
-
     
 
     //TODO 一个命令可以回复客户端，只有在它以及它之前所有实例被ack时，才能回复客户端
@@ -1577,46 +1618,42 @@ public class TPOChainProto extends GenericProtocol {
     // 所以不是同步的，所以有时候可能稍后延迟，需要两者齐全
     // 所以每次分发消息或 排序消息达到执行要求后，都要对从
     // 全局日志的已经ack到当前decided之间的消息进行扫描，达到命令执行的要求
-
-    // TODO 这里也包括了GC(垃圾收集)模块
-    //   垃圾收集 既对局部日志GC也对全局日志进行GC，即是使用对应数据结构的remove方法
+    
     //排序  
     //todo  在外面包含这个判断逻辑
     private void execute(int instanceN){
         
-        //在全局日志中既包含了成员管理  no_op  也包含了 排序信息
-        // 这里只筛选出 包含
-        //判断类型
-        // TODO: 2023/5/19 i应该是从execute开始还是execute+1开始 
-        for (int i=highestExecuteInstanceCl+1;i<= instanceN;i++){
-            if (globalinstances.get(i).acceptedValue.type!= PaxosValue.Type.SORT){
-                // 那消息可能是成员管理消息  也可能是noop消息
-                // TODO: 2023/5/22 将附加的读执行
-                highestExecuteInstanceCl++;
-                continue;
-            }else {
-                SortValue sortTarget= (SortValue)globalinstances.get(i).acceptedValue;
-                Host target=sortTarget.getNode();
-                int  iNtarget=sortTarget.getiN();
-                // TODO: 2023/5/19 hashMap没有这个东西会不会返回null 
-                InstanceState ins= instances.get(target).get(iNtarget);
-                if (ins == null || ins.isDecided()==false){
-                    return ;// 不能进行执行
-                }
-                if (ins.acceptedValue.type == PaxosValue.Type.NO_OP){
-                    highestExecuteInstanceCl++;
-                }else {
-                    triggerNotification(new ExecuteBatchNotification(((AppOpBatch) ins.acceptedValue).getBatch()));
-                    highestExecuteInstanceCl++; 
-                }
-            }
+        SortValue sortTarget= (SortValue)globalinstances.get(instanceN).acceptedValue;
+        Host target=sortTarget.getNode();
+        int  iNtarget=sortTarget.getiN();
+        InstanceState ins= instances.get(target).get(iNtarget);
+        if (ins == null || !ins.isDecided()){
+            return ;// 不能进行执行,结束执行
         }
+        // 分发消息是一个刷新消息
+        if (ins.acceptedValue.type== PaxosValue.Type.NO_OP){
+            highestExecuteInstanceCl++;
+            return ;
+        }
+        triggerNotification(new ExecuteBatchNotification(((AppOpBatch) ins.acceptedValue).getBatch()));
+        highestExecuteInstanceCl++;
+        
     }
 
-    // TODO: 2023/5/22 不需要单独的GC(),在执行时同时进行垃圾收集 
-    // TODO: 2023/5/19 对于execute到ack(不包括 ：因为有读附加在ack的实例中)的实例之间的 
-    private  void  gc(){
-         for(int i=highestExecuteInstanceCl;i < highestAcknowledgedInstanceCl;i++){}
+    //   这里也包括了GC(垃圾收集)模块
+    //   垃圾收集 既对局部日志GC也对全局日志进行GC，即是使用对应数据结构的remove方法
+    //对单个实例在进行ack时调用这个垃圾收集并进行触发读处理
+    private  void  gcAndRead(int  iN,Host target,int targetid){
+        // 删除全局日志
+        InstanceStateCL ins = globalinstances.remove(iN);
+        // 触发读
+        ins.getAttachedReads().forEach((k, v) -> sendReply(new ExecuteReadReply(v, ins.iN), k));
+        
+        if (target==null){// 不存在局部日志的话，不应执行那下面几步
+            return ;
+        }
+        //删除局部日志
+        instances.get(target).remove(targetid);
     }
     
     
@@ -1840,18 +1877,14 @@ public class TPOChainProto extends GenericProtocol {
     }
 
 
-    
-    // TODO: 2023/5/19 对于新加入节点的命令执行的标识怎么设置   decide  accept  ack  execute
-    
-    //Notice
-    //GC回收
+    // TODO: 2023/5/22 对于新加入节点的命令执行的标识怎么设置   decide  accept  ack  execute
 
+    // TODO: 2023/5/22 对于接收ack()怎么处理 
+    
+    
     //TODO  新加入的currentSN怎么解决，会不会触发leader的选举
     //  应该不会，不是前链节点 
     // 那原协议，怎么解决：
-    //
-
-    
     
     
     
@@ -1987,10 +2020,18 @@ public class TPOChainProto extends GenericProtocol {
             triggerNotification(new InstallSnapshotNotification(msg.state));
             // 
             state = TPOChainProto.State.ACTIVE;
-            bufferedOps.forEach(o -> triggerNotification(new ExecuteBatchNotification(o.getBatch())));
+            // TODO: 2023/5/22 根据怎么存在 bufferedOps ，这里就怎么处理 
+            while (!bufferedOps.isEmpty()) {
+                SortValue element = bufferedOps.poll(); // 出队一个元素并返回
+                execute(element.getiN());
+                // 处理队头元素
+                // ...
+                // 在此处可以对队头元素进行处理，可以根据具体需求编写处理逻辑
+                //bufferedOps.forEach(o -> triggerNotification(new ExecuteBatchNotification(o.getBatch())));
+            }
             // TODO: 2023/5/17 bufferedOPs的清空  
             /*
-            highestExecuteInstanceCl=bufferedOps.size();
+            highestExecuteInstanceCl +=bufferedOps.size();
             bufferedOps.clear();
             */
         }
