@@ -390,12 +390,28 @@ public class Membership {
         //不管是前链还是后链，都要将受影响节点加入 待移除列表中
         boolean add = pendingRemoval.add(affectedHost);
         assert add;
+        if (frontChainContain(affectedHost)){//如果当前节点在前链，移至后链
+            frontChain.remove(affectedHost);
+            backChain.add(affectedHost);
+        }
     }
 
     public void cancelPendingRemoval(Host affectedHost) {
         boolean remove = pendingRemoval.remove(affectedHost);
         assert remove;
     }
+
+    
+    // TODO: 2023/5/22 将后链节点附加在对应的前链节点
+    public Host  appendFrontChainNode(Host self,Host leader){
+        if (frontChainContain(self)){// 如果当前节点是前链的话，不需要附加
+            return null;
+        }
+        // 将后链节点节点附加在leader后面节点的对应位置
+        int  offset=(frontIndexOf(leader)+backIndexOf(self)+1)% frontChain.size();
+        return frontChain.get(offset);// 因为前链是F+1个节点，后链是F个节点。跳过leader
+    }
+    
     
     
     /**

@@ -735,13 +735,25 @@ public class TPOChainProto extends GenericProtocol {
         triggerMembershipChangeNotification();
     }
 
+    
     /**
      * 发送成员改变通知
      * */
     private void triggerMembershipChangeNotification() {
-        triggerNotification(new MembershipChange(
-                membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
-                null, supportedLeader().getAddress(), null));
+        Host  host=membership.appendFrontChainNode(self,supportedLeader());
+        if(host!=null){// 说明是后链节点，有附加的前链节点
+            triggerNotification(new MembershipChange(
+                    membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
+                    null, host.getAddress(), null));
+        }else{// 自己就是前链节点
+            triggerNotification(new MembershipChange(
+                    membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
+                    null, self.getAddress(), null));
+        }
+        // 下面是原版
+        //triggerNotification(new MembershipChange(
+        //        membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
+        //        null, supportedLeader().getAddress(), null));
     }
     
     
@@ -1438,8 +1450,6 @@ public class TPOChainProto extends GenericProtocol {
         //Actually execute message
         if (instance.acceptedValue.type == PaxosValue.Type.SORT) {
             if (state == TPOChainProto.State.ACTIVE){
-                highestExecuteInstanceCl;
-                highestDecidedInstanceCl;
                 //在全局日志中既包含了成员管理  no_op  也包含了 排序信息
                 // 这里只筛选出 包含
                 //判断类型
@@ -1468,7 +1478,9 @@ public class TPOChainProto extends GenericProtocol {
             return ;
         }
     }
+    
     //Notice 读是ack时执行而不是decide时执行
+    // FIXME: 2023/5/22 读应该是在附加的日志项被执行前执行，而不是之后或ack时执行
     /**
      * 对于ack包括以前的消息执行
      * */
@@ -1476,6 +1488,7 @@ public class TPOChainProto extends GenericProtocol {
         if (instanceN<0){
             return ;
         }
+        
         //For nodes in the first half of the chain only
         for (int i = highestDecidedInstanceCl + 1; i <= instanceN; i++) {
             InstanceStateCL ins = globalinstances.get(i);
@@ -1483,14 +1496,15 @@ public class TPOChainProto extends GenericProtocol {
             decideAndExecuteCL(ins);
             assert highestDecidedInstanceCl == i;
         }
-        
+
+        execute(instanceN);
         //先执行上面的代码，先更新状态，
         // Fixme  因为前链节点节点
+        
         //For everyone
         for (int i = highestAcknowledgedInstanceCl + 1; i <= instanceN; i++) {
-            InstanceStateCL ins = globalinstances.remove(i);
+            InstanceStateCL ins = globalinstances.remove(i);//垃圾收集
             ins.getAttachedReads().forEach((k, v) -> sendReply(new ExecuteReadReply(v, ins.iN), k));
-
             assert ins.isDecided();
             //更新ack信息
             highestAcknowledgedInstanceCl++;
@@ -1568,13 +1582,16 @@ public class TPOChainProto extends GenericProtocol {
     //   垃圾收集 既对局部日志GC也对全局日志进行GC，即是使用对应数据结构的remove方法
     //排序  
     //todo  在外面包含这个判断逻辑
-    private void execute(){
+    private void execute(int instanceN){
+        
         //在全局日志中既包含了成员管理  no_op  也包含了 排序信息
         // 这里只筛选出 包含
         //判断类型
         // TODO: 2023/5/19 i应该是从execute开始还是execute+1开始 
-        for (int i=highestExecuteInstanceCl+1;i<= highestDecidedInstanceCl;i++){
+        for (int i=highestExecuteInstanceCl+1;i<= instanceN;i++){
             if (globalinstances.get(i).acceptedValue.type!= PaxosValue.Type.SORT){
+                // 那消息可能是成员管理消息  也可能是noop消息
+                // TODO: 2023/5/22 将附加的读执行
                 highestExecuteInstanceCl++;
                 continue;
             }else {
@@ -1596,6 +1613,7 @@ public class TPOChainProto extends GenericProtocol {
         }
     }
 
+    // TODO: 2023/5/22 不需要单独的GC(),在执行时同时进行垃圾收集 
     // TODO: 2023/5/19 对于execute到ack(不包括 ：因为有读附加在ack的实例中)的实例之间的 
     private  void  gc(){
          for(int i=highestExecuteInstanceCl;i < highestAcknowledgedInstanceCl;i++){}
@@ -1759,7 +1777,7 @@ public class TPOChainProto extends GenericProtocol {
         // 接下来是执行
         // TODO: 2023/5/18   需要等待排序命令一块到达才可以执行，触发一次排序命令的执行，因为
         //  排序命令缺少分发命令停止了一些执行
-        execute();
+        //execute();
         //if (instance.acceptedValue.type == PaxosValue.Type.APP_BATCH) {
         //    if (state == TPOChainProto.State.ACTIVE)
         //        triggerNotification(new ExecuteBatchNotification(((AppOpBatch) instance.acceptedValue).getBatch()));
