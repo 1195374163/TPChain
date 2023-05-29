@@ -299,7 +299,7 @@ public class TPOChainProto extends GenericProtocol {
     private final Queue<SortValue> bufferedOps = new LinkedList<>();
     private Map.Entry<Integer, byte[]> receivedState = null;
 
-
+    private  List<Host>  canForgetSoredStateTarget;
 
 
 
@@ -447,6 +447,10 @@ public class TPOChainProto extends GenericProtocol {
         registerTimerHandler(ReconnectTimer.TIMER_ID, this::onReconnectTimer);
         //新加   FlushMsgTimer
         registerTimerHandler(FlushMsgTimer.TIMER_ID, this::onFlushMsgTimer);
+        // 新加  ForgetStateTimer  删除节点存储的state
+        registerTimerHandler(ForgetStateTimer.TIMER_ID, this:: onForgetStateTimer);
+        
+        
         
         //接收来自front的 状态 答复
         registerReplyHandler(DeliverSnapshotReply.REPLY_ID, this::onDeliverSnapshot);
@@ -1087,7 +1091,6 @@ public class TPOChainProto extends GenericProtocol {
     //下面的关于排序的方法是所有节点都能访问处理的
     
     
-    //Notice
     //注意 对过时消息的处理
 
     private void uponAcceptCLMsg(AcceptCLMsg msg, Host from, short sourceProto, int channel) {
@@ -1588,13 +1591,20 @@ public class TPOChainProto extends GenericProtocol {
             nextOkBack=membership.nextLivingInBackChain(self);
             
             openConnection(target);
-            //添加成功后，需要添加一新加节点的局部日志表 和  局部配置表
-            RuntimeConfigure runtimeConfigure=new RuntimeConfigure();
-            hostConfigureMap.put(target,runtimeConfigure);
-            //局部日志进行初始化 
-            //Map<Host,Map<Integer, InstanceState>> instances 
-            Map<Integer, InstanceState>  ins=new HashMap<>();
-            instances.put(target,ins);
+            
+            if (!hostConfigureMap.containsKey(target)){
+                //添加成功后，需要添加一新加节点的局部日志表 和  局部配置表
+                RuntimeConfigure runtimeConfigure=new RuntimeConfigure();
+                hostConfigureMap.put(target,runtimeConfigure);  
+            }
+
+            if (!instances.containsKey(target)){
+                //局部日志进行初始化 
+                //Map<Host,Map<Integer, InstanceState>> instances 
+                Map<Integer, InstanceState>  ins=new HashMap<>();
+                instances.put(target,ins);
+            }
+
             
             if (state == TPOChainProto.State.ACTIVE) {
                 //运行到这个方法说明已经满足大多数了
@@ -1602,8 +1612,6 @@ public class TPOChainProto extends GenericProtocol {
                 assert highestDecidedInstanceCl == instance.iN;
                 //TODO need mechanism for joining node to inform nodes they can forget stored state
                 pendingSnapshots.put(target, MutablePair.of(instance.iN, instance.counter == QUORUM_SIZE));
-                //TODO 这里需要复制一些局部日志
-                // 哪怕多复制一些局部日志都可以
                 sendRequest(new GetSnapshotRequest(target, instance.iN), TPOChainFront.PROTOCOL_ID_BASE);
             }
         }
@@ -1639,9 +1647,9 @@ public class TPOChainProto extends GenericProtocol {
         highestExecuteInstanceCl++;
         
     }
-
-    //   这里也包括了GC(垃圾收集)模块
-    //   垃圾收集 既对局部日志GC也对全局日志进行GC，即是使用对应数据结构的remove方法
+    
+    //这里也包括了GC(垃圾收集)模块
+    //垃圾收集 既对局部日志GC也对全局日志进行GC，即是使用对应数据结构的remove方法
     //对单个实例在进行ack时调用这个垃圾收集并进行触发读处理
     private  void  gcAndRead(int  iN,Host target,int targetid){
         // 删除全局日志
@@ -1877,20 +1885,19 @@ public class TPOChainProto extends GenericProtocol {
     }
 
 
+    
+    
+    
     // TODO: 2023/5/22 对于新加入节点的命令执行的标识怎么设置   decide  accept  ack  execute
-
-    // TODO: 2023/5/22 对于接收ack()怎么处理 
-    
-    
+    // TODO: 2023/5/22 对于接收ack()怎么处理 ,accept(),decide()怎么处理的
     //TODO  新加入的currentSN怎么解决，会不会触发leader的选举
     //  应该不会，不是前链节点 
     // 那原协议，怎么解决：
-    
+    // TODO: 2023/5/22 除了全局日志 
     
     
     
     //请求加入集群的客户端方法
-
     /**
      * 当处理到UnaffiliatedMsg，将节点重新加入集群
      * */
@@ -1902,11 +1909,10 @@ public class TPOChainProto extends GenericProtocol {
             //局部日志清空
             instances.clear();
             
+            // 如果是前链
             if (membership.frontChainContain(self)){
                 cancelfrontChainNodeAction();
-            }else {//后链
-                
-            }
+            } //后链的话，什么也不做
             //关闭所有节点连接
             membership.getMembers().stream().filter(h -> !h.equals(self)).forEach(this::closeConnection);
             //对系统的成员列表进行清空
@@ -1931,7 +1937,7 @@ public class TPOChainProto extends GenericProtocol {
         cancelTimer(frontflushMsgTimer); 
     }
 
-
+    
     //TODO  新加入节点应该联系后链节点，不应该联系前链节点
     // 需要吗？  不需要，因为系统从哪个节点(前链，还是后链) 称为 复制节点
     // 已经得到复制节点已经接收的，未接收的终将接收到，因为它是添加在链的尾端，消息会传达
@@ -1941,7 +1947,7 @@ public class TPOChainProto extends GenericProtocol {
      * */
     private void onJoinTimer(JoinTimer timer, long timerId) {
         if (state == TPOChainProto.State.JOINING) {
-            // Notice 这里用到了seeds，是系统初始输入
+            //这里用到了seeds，是系统初始输入
             Optional<Host> seed = seeds.stream().filter(h -> !h.equals(self)).findAny();
             if (seed.isPresent()) {
                 openConnection(seed.get());
@@ -1961,7 +1967,8 @@ public class TPOChainProto extends GenericProtocol {
     private void uponJoinRequestOut(JoinRequestMsg msg, Host to, short destProto, int channelId) {
         closeConnection(to);
     }
-
+    
+    // Notice 在第F+1个节点发送joinsuccessMsg，后续F个，以及前链前F个节点都会发joinsuccessMsg
     /**
      * 收到添加操作被执行的节点的反馈：先是后链节点 ，后是前链节点发送
      * */
@@ -1980,6 +1987,8 @@ public class TPOChainProto extends GenericProtocol {
                 assert receivedState.getKey().equals(msg.iN);
                 triggerNotification(new InstallSnapshotNotification(receivedState.getValue()));
                 state = TPOChainProto.State.ACTIVE;
+                // TODO: 2023/5/23  关于加入成功后，就执行暂存的命令，合适吗 
+                //   还有对bufferedOps的清空
                 //bufferedOps.forEach(o -> triggerNotification(new ExecuteBatchNotification(o.getBatch())));
             } else {//在没有接收到F+1节点传递过来的状态
                 state = TPOChainProto.State.WAITING_STATE_TRANSFER;
@@ -2042,6 +2051,7 @@ public class TPOChainProto extends GenericProtocol {
     
     
     
+    
 
     //加入节点的接收服务端处理方法
 
@@ -2065,8 +2075,11 @@ public class TPOChainProto extends GenericProtocol {
     private void uponStateRequestMsg(StateRequestMsg msg, Host from, short sourceProto, int channel) {
         Pair<Integer, byte[]> storedState = storedSnapshots.get(from);
         if (storedState != null) {
+            // 如果存储的状态列表中存在，直接发送
             sendMessage(new StateTransferMsg(storedState.getKey(), storedState.getValue()), from);
         } else if (pendingSnapshots.containsKey(from)) {
+            // 节点还在请求状态的过程中，还没有处理完毕
+            // 设置标记位为true，可以给新加入节点发送状态
             pendingSnapshots.get(from).setRight(true);
         } else {
             logger.error("Received stateRequest without having a pending snapshot... " + msg);
@@ -2074,8 +2087,7 @@ public class TPOChainProto extends GenericProtocol {
         }
     }
 
-    //Notice  所有执行添加节点的节点都会存储一个状态
-
+    // 所有执行添加节点的节点都会存储一个状态
     /**
      *接收到Frontend发来的Snapshot，转发到target.
      * */
@@ -2083,16 +2095,26 @@ public class TPOChainProto extends GenericProtocol {
         //  移除等待状态队列中  一个是GC  
         MutablePair<Integer, Boolean> pending = pendingSnapshots.remove(not.getSnapshotTarget());
         assert not.getSnapshotInstance() == pending.getLeft();
-        
+
+        // TODO: 2023/5/23 需要机制来对存储的状态进行垃圾收集 
+        //  可以设置一个时钟多长时间进行清除状态
         storedSnapshots.put(not.getSnapshotTarget(), Pair.of(not.getSnapshotInstance(), not.getState()));
-        //当此节点正好是F+1，正好是第qurom个节点，其余的不满足条件
+        
+        //当此节点正好是F+1，正好是第qurom个节点，其余的不满足条件为false
+        // 或者  某个节点收到来自加入节点的状态请求消息，这个会设置为true 
         if (pending.getRight()) {
             sendMessage(new StateTransferMsg(not.getSnapshotInstance(), not.getState()), not.getSnapshotTarget());
         }
     }
-
-
-
+   
+    /**
+     * 设置一个时钟对超时的状态进行删除操作 ：这个时间和状态转换的时间有关系，比他大一点 
+     * */
+    private void onForgetStateTimer(ForgetStateTimer timer, long timerId) {
+        // 如果超时，进行删除对应
+        
+        //storedSnapshots.remove();
+    }
 
 
 

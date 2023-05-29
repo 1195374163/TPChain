@@ -357,6 +357,10 @@ public class Membership {
         indexMap.clear();
         frontIndexMap.clear();
         backIndexMap.clear();
+
+        members.clear();
+        members.addAll(frontChain);
+        members.addAll(backChain);
         
         logger.debug("New " + this);
         checkFrontSizeAgainstQUORUM();
@@ -393,9 +397,21 @@ public class Membership {
         if (frontChainContain(affectedHost)){//如果当前节点在前链，移至后链
             frontChain.remove(affectedHost);
             backChain.add(affectedHost);
+            // 对members进行更新
+            members.clear();
+            members.addAll(frontChain);
+            members.addAll(backChain);
         }
     }
-
+    
+    /**
+     * 更新members
+     * */
+    public  void  updateMember(){
+        members.clear();
+        members.addAll(frontChain);
+        members.addAll(backChain);
+    }
     public void cancelPendingRemoval(Host affectedHost) {
         boolean remove = pendingRemoval.remove(affectedHost);
         assert remove;

@@ -5,7 +5,7 @@ import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
 import pt.unl.fct.di.novasys.network.ISerializer;
 
 import java.util.Arrays;
-// TODO 除了状态  还有 包含Membership对象
+
 public class StateTransferMsg extends ProtoMessage {
 
     public static final short MSG_CODE = 210;
