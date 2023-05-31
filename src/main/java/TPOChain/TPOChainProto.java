@@ -491,7 +491,7 @@ public class TPOChainProto extends GenericProtocol {
         members.stream().filter(h -> !h.equals(self)).forEach(this::openConnection);
         //对全局的排序消息进行配置  -1
         joiningInstanceCl = highestAcceptedInstanceCl = highestExecuteInstanceCl =highestAcknowledgedInstanceCl = highestDecidedInstanceCl =
-                instanceNumber;// instanceNumber初始为-1
+                instanceNumber;// instanceNumber初始为-1,但对于
         //对命令分发进行初始化配置
         for (Host temp:members) {
             //对分发的配置进行初始化  hostConfigureMap
@@ -1775,6 +1775,7 @@ public class TPOChainProto extends GenericProtocol {
         //    logger.error("Received accept from removed node (?)");
         //    throw new AssertionError("Received accept from removed node (?)");
         //}
+        // TODO: 2023/5/29 如果分发消息的节点已经不在集群中，则对全部的节点发送对应消息的ack 
         if (nextOkFront==null && nextOkBack==null) { //am last 只有最理想的情况下：有后链链尾尾节点会这样
             //If last in chain than we must have decided (unless F+1 dead/inRemoval)
             if (inst.counter < QUORUM_SIZE) {
@@ -1783,6 +1784,7 @@ public class TPOChainProto extends GenericProtocol {
                 throw new AssertionError("Last living in chain cannot decide. " +
                         "Are f+1 nodes dead/inRemoval? " + inst.counter);
             }
+            // TODO: 2023/5/29   进行判断 inst.highestAccept.getNode() 是否已经不在系统中了
             sendMessage(new AcceptAckMsg(inst.iN), inst.highestAccept.getNode());
         } else {
             if (inst.counter < QUORUM_SIZE){// 投票数不满F+1，发往nextOkFront
@@ -1908,6 +1910,8 @@ public class TPOChainProto extends GenericProtocol {
             globalinstances.clear();
             //局部日志清空
             instances.clear();
+            // 局部日志配置表也清空
+            hostConfigureMap.clear();
             
             // 如果是前链
             if (membership.frontChainContain(self)){
@@ -1973,6 +1977,7 @@ public class TPOChainProto extends GenericProtocol {
      * 收到添加操作被执行的节点的反馈：先是后链节点 ，后是前链节点发送
      * */
     private void uponJoinSuccessMsg(JoinSuccessMsg msg, Host from, short sourceProto, int channel) {
+        // 在收到第F+1时执行这个
         if (state == TPOChainProto.State.JOINING) {
             hostsWithSnapshot.add(from);
             cancelTimer(joinTimer);
@@ -1982,12 +1987,13 @@ public class TPOChainProto extends GenericProtocol {
             
             //setupInitialState(msg.membership, msg.iN);
             setupJoinInitialState(msg.membership,msg.iN);
+            // TODO: 2023/5/29 对局部日志的初始化，和参数的配置
             setNewInstanceLeader(msg.iN, msg.sN);
             if (receivedState != null) {//第F+1节点传递过来StateTransferMsg消息
                 assert receivedState.getKey().equals(msg.iN);
                 triggerNotification(new InstallSnapshotNotification(receivedState.getValue()));
                 state = TPOChainProto.State.ACTIVE;
-                // TODO: 2023/5/23  关于加入成功后，就执行暂存的命令，合适吗 
+                // TODO: 2023/5/23  关于加入成功后，就执行暂存的命令，合适吗？ 
                 //   还有对bufferedOps的清空
                 //bufferedOps.forEach(o -> triggerNotification(new ExecuteBatchNotification(o.getBatch())));
             } else {//在没有接收到F+1节点传递过来的状态
@@ -1995,6 +2001,7 @@ public class TPOChainProto extends GenericProtocol {
                 stateTransferTimer = setupTimer(StateTransferTimer.instance, STATE_TRANSFER_TIMEOUT);
             }
         } else if (state == TPOChainProto.State.WAITING_STATE_TRANSFER) {
+            //在收到第F+1 到2F+1,以及前链F个时
             hostsWithSnapshot.add(from);
         } else
             logger.warn("Ignoring " + msg);
@@ -2047,14 +2054,13 @@ public class TPOChainProto extends GenericProtocol {
     }
 
     //TODO  新加入节点也要对局部日志和节点配置表进行更新
-    
-    
-    
-    
-    
 
+
+    // TODO: 2023/5/29 因为joinsuccessage和store  state是配套的，
+    //  用哪个节点的store state就用那个 joinMessage
     //加入节点的接收服务端处理方法
 
+    
     /**
      * 所有节点都可能收到新节点的请求加入信息，收到之后将添加节点信息发给supportedLeader()
      * */
@@ -2062,7 +2068,7 @@ public class TPOChainProto extends GenericProtocol {
         if (state == TPOChainProto.State.ACTIVE)
             if (supportedLeader() != null)
                 sendOrEnqueue(new MembershipOpRequestMsg(MembershipOp.AddOp(from)), supportedLeader());
-            else //有leader
+            else //无leader的情况下
                 logger.warn("Nobody to re-propagate to");
         else
             logger.warn("Ignoring joinRequest while in " + state + " state: " + msg);
@@ -2112,7 +2118,8 @@ public class TPOChainProto extends GenericProtocol {
      * */
     private void onForgetStateTimer(ForgetStateTimer timer, long timerId) {
         // 如果超时，进行删除对应
-        
+        // TODO: 2023/5/29 设置节点状态删除条件，如果ack发送的是节点存储的的那个实例号，
+        //  进行删除存储的状态
         //storedSnapshots.remove();
     }
 

@@ -121,7 +121,20 @@ public class Membership {
     }
 
 
+    
+    /*
+    返回前链的链尾是从leader作为链头开始的，那么leader的前一个节点就是前链链尾 
+    */
+    public Host  getFrontChainTail(Host leader){
+        int leaderIndex=frontIndexOf(leader);
+        if (leaderIndex<0){
+            return null;
+        }
+        int frontChainIndex=((leaderIndex-1)+frontChain.size())%frontChain.size();
+        return frontChain.get(frontChainIndex);
+    }
 
+    
     /**
      * 得到后链的首节点
      * */
