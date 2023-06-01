@@ -66,7 +66,7 @@ public class TPOChainFront extends FrontendProto {
         this.BATCH_SIZE = Integer.parseInt(props.getProperty(BATCH_SIZE_KEY));
         this.LOCAL_BATCH_SIZE = Integer.parseInt(props.getProperty(LOCAL_BATCH_SIZE_KEY));
         
-        //象征着leader
+        //象征着leader,这里是挂载的前链节点
         writesTo = null;
         writesToConnected = false;
         

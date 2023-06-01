@@ -436,6 +436,9 @@ public class Membership {
         if (frontChainContain(self)){// 如果当前节点是前链的话，不需要附加
             return null;
         }
+        if (leader==null){//
+            return null;
+        }
         // 将后链节点节点附加在leader后面节点的对应位置
         int  offset=(frontIndexOf(leader)+backIndexOf(self)+1)% frontChain.size();
         return frontChain.get(offset);// 因为前链是F+1个节点，后链是F个节点。跳过leader
