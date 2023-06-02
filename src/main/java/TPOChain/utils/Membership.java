@@ -81,6 +81,17 @@ public class Membership {
     public boolean contains(Host host) {
         return indexOf(host) >= 0;
     }
+    public boolean isAlive(Host host) {
+        if(indexOf(host) >= 0){
+            if (pendingRemoval.contains(host)){
+                return false;
+            }else {
+                return true;
+            }
+        }else {//说明节点不存在
+            return  false;
+        }
+    }
     //根据索引判断某个节点是否在前链中
     public boolean frontChainContain(Host host){
         return frontIndexOf(host) >= 0;
@@ -90,7 +101,14 @@ public class Membership {
         return backIndexOf(host) >= 0;
     }
     
-
+    /*
+     
+    */
+    //public boolean (){
+    //    
+    //}
+    
+    
     //TODO  检测集群当前存活的节点，
     // 不需要；在链尾检测不满F+1个投票，系统会终止
     // TODO: 2023/5/19 这里真的可行吗？ 特别对于前链节点要有投票F+1
