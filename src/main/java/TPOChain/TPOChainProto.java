@@ -70,7 +70,7 @@ public class TPOChainProto extends GenericProtocol {
      * */
 
     
-    //TODO 打算废弃？
+    //打算废弃？
     // 不能废弃，因为 在系统处于状态不稳定(即无leader时)时，暂存一些重要命令，如其他节点发过来的
     // 成员添加命令
     /**
@@ -93,48 +93,16 @@ public class TPOChainProto extends GenericProtocol {
      * 代表自身，左右相邻主机
      * */
     private final Host self;
-
     
-    // 废弃，使用下面那两个进行转发消息
-    //private Host nextOkCl;
-   
     //对于leader的排序消息和分发消息都是同一个消息传播通道，
     // 关键是能否正确的传达到下一个节点，不以消息类型进行区分
     
     /**
-     * 排序消息的下一个节点
+     * 消息的下一个节点
      * */
     private Host nextOkFront;
     private Host nextOkBack;
     
-    //todo 以消息的投票数决定发到下一个前链节点(少于F+1)，还是发往后链节点(>=F+1)
-    // 在commandleader被替换时注意(即进行mark之后)，断开前的那个节点要往新的节点以及ack到accept的
-    // 全局日志，以及所有局部日志，重发ack信息
-    
-    
-    
-    //todo
-    // 删除节点时，进行了标记，那么在标记后会发生什么？特别是删除的前链，会做什么？
-    // 除了因为故障死机，还有因为网络堵塞，没连上集群节点的情况
-    
-    //todo
-    // 若在链尾节点，中发现一个分发消息不在集群中，那么对全体广播ack，对消息进行一个确认
-    //
-    
-    
-    //todo
-    // 新加入节点会在刚和前末尾节点连接时，前末尾节点检测输出口，前末尾节点会进行所有消息的转发
-    // 若新加入节点是后链的链首
-    // 若新加入节点是后链的其他节点
-    // 不会出现新加入节点是前链的情况，因为那是因为系统节点不满足F+1已经终止了
-    // 新加入节点，在加入时，先取得状态还是先取得前继节点发来的消息
-    
-    //todo  
-    // 新加入节点也要 申请一份局部日志 和他的 局部日志表
-    // 先判断是否已经存在：出现这种情况是 被删除节点重新加入集群
-    
-    
-    //todo 在leader宕机时，只是前链节点转发新的消息不能进行，老消息可以继续进行
     
     
     
@@ -149,7 +117,7 @@ public class TPOChainProto extends GenericProtocol {
     private final Set<Host> establishedConnections = new HashSet<>();
     
     
-    // 也是视图
+    
     /**
      * 代表着leader，有term 和  Host 二元组组成
      * */
@@ -157,6 +125,7 @@ public class TPOChainProto extends GenericProtocol {
     //SeqN是一个term,由<int,host>组成，而currentSN前面的Int，是term刚开始的实例号
     
 
+    
     /**
      * 是否为leader,职能排序
      * */
@@ -176,12 +145,10 @@ public class TPOChainProto extends GenericProtocol {
     
     
     
+    
     /**
-     *计时 非leader计算与leader之间的呼吸
-     * 只有前链节点有
+     *计时 非leader前链节点计算与leader之间的呼吸
      * */
-    //多长时间没接收到leader消息
-    //前链节点闹钟----计时与leader之间的上一次的通信时间
     private long leaderTimeoutTimer;
     //在每个节点标记上次leader命令的时间
     private long lastLeaderOp;
@@ -196,23 +163,23 @@ public class TPOChainProto extends GenericProtocol {
      * */
     private boolean amFrontedNode;
     
-    //Option 在commandleader发送第一条命令的时候开启闹钟，在发完三次flushMsg之后进行关闭
-    // 闹钟的开启和关闭 不进行关闭
-    //   在第一次ack和accept相等时，关闹钟，刚来时
+    //在commandleader发送第一条命令的时候开启闹钟，
+    // 在第一次ack和  accept与send  相等时，关闹钟，刚来时
     private long frontflushMsgTimer = -1;
-    //主要是前链什么时候发送
+    //主要是前链什么时候发送flushMsg信息
     private long lastSendTime;
     
     // 还有一个field ： System.currentTimeMillis(); 隐含了系统的当前时间
     
     
     
-    
-    //前链
+    //标记前链节点能否开始处理客户端的请求
     private boolean canHandleQequest=false;
     
-    //前链节点
+    //前链节点是否已经发送sendFlushFlag
     private  boolean  sendFlushMsgFlag=false;
+    
+    
     
 
     /**
@@ -223,7 +190,6 @@ public class TPOChainProto extends GenericProtocol {
     /**
      * 局部日志
      */
-//    private final Map<Integer, InstanceState> instances = new HashMap<>(INITIAL_MAP_SIZE);
     private final Map<Host,Map<Integer, InstanceState>> instances = new HashMap<>(INITIAL_MAP_SIZE);
 
     /**
@@ -235,10 +201,7 @@ public class TPOChainProto extends GenericProtocol {
     
     
     /**
-     *leader的排序字段
-     * */
-    /**
-     * 这是主要排序阶段使用
+     * leader这是主要排序阶段使用
      * */
     private int highestAcknowledgedInstanceCl = -1;
     // Notice 因为两份日志需要都齐全的话，才能执行命令，
@@ -249,6 +212,8 @@ public class TPOChainProto extends GenericProtocol {
     private int highestAcceptedInstanceCl = -1;
     //leader使用，即使发生leader交换时，由新leader接棒
     private int lastAcceptSentCl = -1;
+    
+    
     
 
     // 分发时的配置信息
@@ -301,7 +266,6 @@ public class TPOChainProto extends GenericProtocol {
      */
     private final Queue<SortValue> bufferedOps = new LinkedList<>();
     private Map.Entry<Integer, byte[]> receivedState = null;
-
     private  List<Host>  canForgetSoredStateTarget;
 
 
@@ -322,6 +286,36 @@ public class TPOChainProto extends GenericProtocol {
      * */
     private final LinkedList<Host> seeds;
 
+
+    //todo 以消息的投票数决定发到下一个前链节点(少于F+1)，还是发往后链节点(>=F+1)
+    // 在commandleader被替换时注意(即进行mark之后)，断开前的那个节点要往新的节点以及ack到accept的
+    // 全局日志，以及所有局部日志，重发ack信息
+
+
+    //todo
+    // 删除节点时，进行了标记，那么在标记后会发生什么？特别是删除的前链，会做什么？
+    // 除了因为故障死机，还有因为网络堵塞，没连上集群节点的情况
+
+
+    //todo
+    // 若在链尾节点，中发现一个分发消息的发送者不在集群中，那么对全体广播ack，对消息进行一个确认
+    // 全部节点对于这个消息进行ack
+
+
+    //todo
+    // 新加入节点会在刚和前末尾节点连接时，前末尾节点检测输出口，前末尾节点会进行所有消息的转发
+    // 若新加入节点是后链的链首
+    // 若新加入节点是后链的其他节点
+    // 不会出现新加入节点是前链的情况，因为那是因为系统节点不满足F+1已经终止了
+    // 新加入节点，在加入时，先取得状态还是先取得前继节点发来的消息
+
+
+    //todo  
+    // 新加入节点也要 申请一份局部日志 和他的 局部日志表
+    // 先判断是否已经存在：出现这种情况是 被删除节点重新加入集群
+
+
+    //todo 在leader宕机时，只是前链节点转发新的客户端消息不能进行，老消息可以继续进行
     
     
     /**
@@ -670,7 +664,7 @@ public class TPOChainProto extends GenericProtocol {
     
     
     // Notice 
-    //  消息的顺序性：
+    //  消息的顺序性： 
     
     
     
@@ -904,8 +898,6 @@ public class TPOChainProto extends GenericProtocol {
     //Notice
     // 在leader选举成功，前链节点才能开始工作
     
-    //NOTE 
-    
     /**
      * I am leader now! @ instance
      * */
@@ -983,9 +975,10 @@ public class TPOChainProto extends GenericProtocol {
     }
     
     
-    private void uponElectionSuccessMsg(ElectionSuccessMsg msg, Host from, short sourceProto, int channel) {
-        
-    }
+    // 在成功选举后，发送选举成功消息
+    //private void uponElectionSuccessMsg(ElectionSuccessMsg msg, Host from, short sourceProto, int channel) {
+    //    
+    //}
 
 
     
@@ -1007,6 +1000,7 @@ public class TPOChainProto extends GenericProtocol {
     //TODO 因为只有在分发和排序都存在才可以执行，若非leader故障
     // 对非leader的排序消息要接着转发，不然程序执行不了
     // 所以先分发，后排序
+    // 处理流程先分发后排序，若分发
     
     
     //TODO  当前链节点的accpt与ack标志相当时，cancel  flushMsg闹钟
@@ -1948,6 +1942,8 @@ public class TPOChainProto extends GenericProtocol {
         if (instanceN<0){
             return;
         }
+        // 考虑重复消息,重复处理
+        
         
         // 先得到排序commandleader节点的配置信息
         RuntimeConfigure  hostSendConfigure= hostConfigureMap.get(sendHost);
@@ -1976,8 +1972,6 @@ public class TPOChainProto extends GenericProtocol {
         //    if(hostConfigureMap.get(self).highestAcknowledgedInstance +1 == hostConfigureMap.get(self).lastAcceptSent) {
         //        hostConfigureMap.get(self).highestAcknowledgedInstance++;
         //        cancelTimer(frontflushMsgTimer);
-        //
-        //       
         //    }
         //}
 
@@ -2020,6 +2014,8 @@ public class TPOChainProto extends GenericProtocol {
         // TODO: 2023/6/2  执行ack程序  和     
     }
 
+    
+    
     
     
     

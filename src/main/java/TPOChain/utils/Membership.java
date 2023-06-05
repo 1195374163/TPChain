@@ -26,7 +26,8 @@ public class Membership {
     private final Map<Host, Integer> indexMap;
     
     
-    //对于要删除的节点，还保留着原来在list中的位置，并且将其纳入pendingRemoval集合
+    //对于要删除的节点，如果是后链，还保留着原来在list中的位置
+    // 如果是前链移至后链链尾，并且将其纳入pendingRemoval集合
     //在查询得到下一个节点要跳过这个节点
     /**
      * 待处理的要删除的节点
@@ -77,10 +78,9 @@ public class Membership {
     public  int   backIndexOf(Host host){
         return backIndexMap.computeIfAbsent(host, backChain::indexOf);
     }
-    // 根据索引判断某个节点是否在链中
-    public boolean contains(Host host) {
-        return indexOf(host) >= 0;
-    }
+
+    /** 判断一个节点是否在集群里
+     * */
     public boolean isAlive(Host host) {
         if(indexOf(host) >= 0){
             if (pendingRemoval.contains(host)){
@@ -92,6 +92,11 @@ public class Membership {
             return  false;
         }
     }
+    // 根据索引判断某个节点是否在链中
+    public boolean contains(Host host) {
+        return indexOf(host) >= 0;
+    }
+    
     //根据索引判断某个节点是否在前链中
     public boolean frontChainContain(Host host){
         return frontIndexOf(host) >= 0;
@@ -100,13 +105,6 @@ public class Membership {
     public boolean  backChainContain(Host host){
         return backIndexOf(host) >= 0;
     }
-    
-    /*
-     
-    */
-    //public boolean (){
-    //    
-    //}
     
     
     //TODO  检测集群当前存活的节点，
@@ -138,20 +136,18 @@ public class Membership {
         }
     }
 
-
     
-    /*
+    /**
     返回前链的链尾是从leader作为链头开始的，那么leader的前一个节点就是前链链尾 
     */
     public Host  getFrontChainTail(Host leader){
         int leaderIndex=frontIndexOf(leader);
-        if (leaderIndex<0){
+        if (leaderIndex<0){// 如果leader不存在
             return null;
         }
         int frontChainIndex=((leaderIndex-1)+frontChain.size())%frontChain.size();
         return frontChain.get(frontChainIndex);
     }
-
     
     /**
      * 得到后链的首节点
@@ -196,6 +192,8 @@ public class Membership {
     }
     
     
+    
+    
     //后链的下一个节点为空
     /**
      * 返回当前节点在前段链的下一个存活节点s
@@ -209,7 +207,8 @@ public class Membership {
         
         int nextIndex = (frontIndexOf(myHost) + 1) % frontChain.size();
         Host nextHost = frontChain.get(nextIndex);
-        //标记节点中包括此节点 ，下一次循环
+        //前链节点是一个循环链表
+        //标记节点中包括此节点 ，下一次循环 
         while (pendingRemoval.contains(nextHost)){
             nextIndex = (nextIndex + 1) % frontChain.size();
             nextHost = frontChain.get(nextIndex);
@@ -234,6 +233,7 @@ public class Membership {
             Host temp=getBackChainHead();
             return temp;//这个可能返回null 意味着没有后链节点了
         }
+        
         //应该在链尾节点终止
         //后面是后链节点的流程
         Host tail=getBackChainTail();
@@ -241,82 +241,25 @@ public class Membership {
             return null;
         }
         
+        // 如果当前节点是后链物理存在的最后一个节点，返回null
+        if (backIndexOf(myHost)==backChain.size()-1){
+            return  null;
+        }
         
-        int nextIndex = (backIndexOf(myHost) + 1) % backChain.size();
+        int nextIndex = backIndexOf(myHost) + 1;
         Host nextHost = backChain.get(nextIndex);
         //标记节点中包括此节点 ，下一次循环
         while (pendingRemoval.contains(nextHost)) {
-            nextIndex = (nextIndex + 1) % backChain.size();
+            nextIndex = nextIndex + 1;
+            if (nextIndex>=backChain.size()){
+                return null;
+            }
             nextHost = backChain.get(nextIndex);
         }
         return nextHost;
     }
-
     
     
-    //TODO  判断是否是逻辑链的尾部， 
-    // 针对前链和 后链节点 不同的判定标准
-    //因为删除前链节点，会导入后链首节点成为替代原来位置的前链节点
-    //public boolean isAfterLeader(Host me, Host leader, Host other) {
-    //    if(!contains(me) || !contains(leader) || !contains(other)){
-    //        logger.error("Membership does not contain: " + me + " " + leader + " " + other + ".." + members);
-    //    }
-    //    assert contains(me) && contains(leader) && contains(other);
-    //    
-    //    //if (membership.isAfterLeader(self, inst.highestAccept.getNode(), target)
-    //    //上面是这个函数的调用参数
-    //    if (frontedChainNode.get(me).equals(Boolean.TRUE)){//说明为前链
-    //        //前链只有在没有后链节点时才为链尾
-    //        if (getBackChainHead()==null) {
-    //            //只有消息的leader是当前节点的前链的前继，才能说明是链尾
-    //            
-    //        } else {//说明还有后链节点
-    //            return  false;
-    //        }
-    //    }else{
-    //        //说明为后链
-    //        Host tail=getBackChainTail();
-    //        if (tail.equals(me)){
-    //            return true;
-    //        }else {
-    //            return false;
-    //        }
-    //    }
-    //    return  false;
-    //}
-    
-    
-    ////TODO 需要修改 因为前链和后链
-    ////通用 ：对前链节点和后链:根据目标Host的类型，也返回中间的一些节点
-    ////哪怕中间有节点属于pendingRemove，也会向其发送消息
-    //
-    ///**
-    // * 返回的从当前节点(不包括当前节点)到目标节点(包括目标节点)的所有节点的Iterator
-    // * */
-    //public Iterator<Host> nextNodesUntil(Host self, Host h){
-    //    //forward()的需要
-    //    int myIdx = indexOf(self);
-    //    int lastIdx = indexOf(h);
-    //    if(lastIdx < 0 || myIdx < 0) {
-    //        logger.error("Called nextNodesUntil with hosts not in membership");
-    //        throw new RuntimeException("Called nextNodesUntil with hosts not in membership");
-    //    }
-    //    int dist = lastIdx - myIdx;
-    //    if (dist < 0) dist += members.size();
-    //
-    //    List<Host> res = new ArrayList<>(dist);
-    //    //暂存  目标节点的前链后链标志位
-    //    Boolean tempboool=frontedChainNode.get(h);
-    //    for(int i = 1 ; i <= dist ; i++){
-    //        Host temp=members.get((myIdx + i)%members.size());
-    //        //当和目标节点同是前链或后链的时候才进行添加
-    //        if (frontedChainNode.get(temp).equals(tempboool)){
-    //            res.add(temp);
-    //        }
-    //    }
-    //    return res.iterator();
-    //}
-    //
     
     /**
      * 返回当前节点若是前链节点的逻辑前链的末尾节点
@@ -404,30 +347,36 @@ public class Membership {
     //在删除操作时，先进行标记，后进行删除
     //若删除的是前链节点，需要将后链首节点与要删除的节点互换位置
     public void addToPendingRemoval(Host affectedHost) {
-        //// 被删除节点是前链的话
-        //if(frontChainContain(affectedHost)){
-        //    Host backChainHead =getBackChainHead();
-        //    if (backChainHead==null){// 没有节点备选作为前链节点，
-        //        logger.error("Not enough nodes to continue. Current nodes: " + members.size() +
-        //                "; 同时没有给前链节点补充了;min nodes: " + MIN_QUORUM_SIZE);
-        //        throw new AssertionError("Not enough nodes to continue. Current nodes: " + members.size() +
-        //                "; min nodes: " + MIN_QUORUM_SIZE);
-        //    }
-        //    
-        //    int indexaffectedHost=frontIndexOf(affectedHost);
-        //    frontChain.add(indexaffectedHost,backChainHead);
-        //    backChain.remove(backChainHead);
-        //    
-        //    indexMap.clear();//索引的缓存清空
-        //    frontIndexMap.clear();
-        //    backIndexMap.clear();
-        //}
+        
         //不管是前链还是后链，都要将受影响节点加入 待移除列表中
         boolean add = pendingRemoval.add(affectedHost);
         assert add;
         if (frontChainContain(affectedHost)){//如果当前节点在前链，移至后链
-            frontChain.remove(affectedHost);
+            int removePosition= frontIndexMap.get(affectedHost);
+            
+            Host  head=getBackChainHead();
+            if (head==null){//说明没有补充的节点
+                logger.error("Not enough nodes to continue. Current nodes: " + frontChain.size() +
+                        "; min nodes: " + MIN_QUORUM_SIZE);
+                throw new AssertionError("Not enough nodes to continue. Current nodes: " + frontChain.size() +
+                        "; min nodes: " + MIN_QUORUM_SIZE);
+            }
+
+            //用原后链链首替换要删除的元素 
+            frontChain.set(removePosition, head);
+            backChain.remove(head);
+            
+            
+            //将要删除节点添加到后链
             backChain.add(affectedHost);
+            
+            
+            // 对索引进行清理
+            indexMap.clear();
+            frontIndexMap.clear();
+            backIndexMap.clear();
+            
+            
             // 对members进行更新
             members.clear();
             members.addAll(frontChain);
@@ -443,6 +392,7 @@ public class Membership {
         members.addAll(frontChain);
         members.addAll(backChain);
     }
+    
     public void cancelPendingRemoval(Host affectedHost) {
         boolean remove = pendingRemoval.remove(affectedHost);
         assert remove;
