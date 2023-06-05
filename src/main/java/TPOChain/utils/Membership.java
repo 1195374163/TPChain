@@ -364,7 +364,8 @@ public class Membership {
 
             //用原后链链首替换要删除的元素 
             frontChain.set(removePosition, head);
-            backChain.remove(head);
+            backChain.remove(head);//后链移除原链首
+            
             
             
             //将要删除节点添加到后链
@@ -399,7 +400,7 @@ public class Membership {
     }
 
     
-    // TODO: 2023/5/22 将后链节点附加在对应的前链节点
+    // 将后链节点附加在对应的前链节点
     public Host  appendFrontChainNode(Host self,Host leader){
         if (frontChainContain(self)){// 如果当前节点是前链的话，不需要附加
             return null;
