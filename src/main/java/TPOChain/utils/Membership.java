@@ -442,6 +442,9 @@ public class Membership {
     }
 
     
+    //public  
+    
+    
     //返回系统中节点的数量 在在tryTakeLeadership()方法中使用
     public int size() {
         return members.size();

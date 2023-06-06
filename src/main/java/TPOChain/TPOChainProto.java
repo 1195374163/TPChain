@@ -227,11 +227,7 @@ public class TPOChainProto extends GenericProtocol {
     
     
     //TODO 新加入节点除了获取系统的状态，还要获取系统的membership，以及前链节点，以及哪些节点正在被删除状态
-    // 正因为这样在执行删除操作时，因进行 可能取消删除某节点操作  后面又添加这节点操作
-    // maybeCancelPendingRemoval   maybeAddToPendingRemoval
-    // 因为新leader的选举成功  特别是消息的重发时，因为term变了，还得接受这个消息
-    
-    
+    // 在joinsuccessMsg添加这些信息
     
     /**
      * 加入节点时需要的一些配置
@@ -509,7 +505,6 @@ public class TPOChainProto extends GenericProtocol {
     }
     
     
-    
     /**
      *前链节点执行的pre操作
     */
@@ -587,9 +582,11 @@ public class TPOChainProto extends GenericProtocol {
     
     
     //TODO  考虑删除节点  在删除节点时，leader故障   在删除节点时，它又新加入集群
-    
-    
 
+    
+    // TODO: 2023/6/6 leader故障，需要添加一个节点到前链节点,是前链节点
+    //  pull协议 在故障在leader节点和非leader节点
+    
     
     
     //  抑制一些候选举leader的情况：只有在与leader相聚(F+1)/2 +1
@@ -600,7 +597,7 @@ public class TPOChainProto extends GenericProtocol {
      * 在leadertimer超时争取当leader
      */
     private void onLeaderTimer(LeaderTimer timer, long timerId) {
-        //无leader时，不能处理事务
+        // 在进入超时,说明失去leader之间的联系
         canHandleQequest=false;
         if (!amQuorumLeader && (System.currentTimeMillis() - lastLeaderOp > LEADER_TIMEOUT) &&
                 (supportedLeader() == null //初始为空  ，或新加入节点
@@ -757,17 +754,14 @@ public class TPOChainProto extends GenericProtocol {
             triggerNotification(new MembershipChange(
                     membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
                     null, host.getAddress(), null));
+            logger.warn("当前节点是后链"+self.toString()+"挂载在"+host.toString());
         }else{// 自己就是前链节点
             triggerNotification(new MembershipChange(
                     membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
                     null, self.getAddress(), null));
+            logger.warn("当前节点是前链"+self.toString());
         }
-        // 下面是原版
-        //triggerNotification(new MembershipChange(
-        //        membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
-        //        null, supportedLeader().getAddress(), null));
     }
-    
     
     
     //此节点落后于其他节点，对排序信息进行处理
@@ -884,7 +878,7 @@ public class TPOChainProto extends GenericProtocol {
         //TODO maybe only need the second argument of max?
         //if (okHosts.size() == Math.max(QUORUM_SIZE, membership.size() - QUORUM_SIZE + 1)) {
         // 当回复prepareok的节点达到系统的大多数
-        if (okHosts.size() ==QUORUM_SIZE) {
+        if (okHosts.size() == QUORUM_SIZE) {
             //已经准备好了，清空答复
             instance.prepareResponses.remove(msg.sN);
             
@@ -943,7 +937,8 @@ public class TPOChainProto extends GenericProtocol {
             }
         });
         
-        //设置为0立马给其他节点发送消息
+        //设置为0立马给其他节点发送消息,因为上面的条件不一定全部满足,
+        // 需要立马发送noop消息
         lastAcceptTimeCl = 0;
         
         
@@ -1064,8 +1059,9 @@ public class TPOChainProto extends GenericProtocol {
         this.uponAcceptCLMsg(new AcceptCLMsg(instance.iN, currentSN.getValue(),
                 (short) 0, nextValue, highestAcknowledgedInstanceCl), self, this.getProtoId(), peerChannel);
         
-        //更新标记
+        //更新发送标记
         lastAcceptSentCl = instance.iN;
+        //更新上次操作时间
         lastAcceptTimeCl = System.currentTimeMillis();
     }
     
@@ -1086,7 +1082,7 @@ public class TPOChainProto extends GenericProtocol {
 
         InstanceStateCL instance = globalinstances.computeIfAbsent(msg.iN, InstanceStateCL::new);
         
-        //"Discarding decided msg"  重复消息
+        //"Discarding decided msg"  重复而且消息已经决定了
         if (instance.isDecided() && msg.sN.equals(instance.highestAccept)) {
             logger.warn("Discarding decided msg");
             return;
@@ -1097,6 +1093,7 @@ public class TPOChainProto extends GenericProtocol {
             logger.warn("Discarding accept since sN < hP: " + msg);
             return;
         }
+        
         //隐含着之后新消息msg.SN大于等于现在的SN
 
 
@@ -1120,6 +1117,7 @@ public class TPOChainProto extends GenericProtocol {
             canHandleQequest=true;
         }
 
+        
         //接收了此次消息
         //进行更新领导操作时间
         lastLeaderOp = System.currentTimeMillis();
@@ -1553,6 +1551,7 @@ public class TPOChainProto extends GenericProtocol {
      * leader接收ack信息，对实例进行ack
      * */
     private void uponAcceptAckCLMsg(AcceptAckCLMsg msg, Host from, short sourceProto, int channel) {
+        // FIXME: 2023/6/5  这里有问题，老是提示“Ignoring acceptAckCL for old instance”
         //logger.debug(msg + " - " + from);
         if (msg.instanceNumber <= highestAcknowledgedInstanceCl) {
             logger.warn("Ignoring acceptAckCL for old instance: " + msg);
@@ -1679,8 +1678,7 @@ public class TPOChainProto extends GenericProtocol {
         // 先得到自己节点的配置信息
         RuntimeConfigure  hostSendConfigure= hostConfigureMap.get(self);
         
-        // 当sent标记和ack相等，说明开启新的一轮分发，要开启时钟，
-        // 同时将标记时间为当前时间
+        // 当sent标记和ack相等，说明开启新的一轮分发，要开启时钟，同时将标记时间为当前时间
         if (hostSendConfigure.lastAcceptSent == hostSendConfigure.highestAcknowledgedInstance){
             frontflushMsgTimer = setupPeriodicTimer(FlushMsgTimer.instance, NOOP_SEND_INTERVAL, Math.max(NOOP_SEND_INTERVAL / 3,1));
             lastSendTime = System.currentTimeMillis();
@@ -1691,16 +1689,16 @@ public class TPOChainProto extends GenericProtocol {
         assert instance.acceptedValue == null && instance.highestAccept == null;
         
         
-        PaxosValue nextValue;
-        if (val.type == PaxosValue.Type.APP_BATCH) {
-            nextValue = val;
-            //nBatches++;
-            //nOpsBatched += ops.size();
-            sendFlushMsgFlag=false;
-        } else{
-            nextValue = new NoOpValue();
-            sendFlushMsgFlag=true;
-        }
+        PaxosValue nextValue=val;
+        //if (val.type == PaxosValue.Type.APP_BATCH) {
+        //    nextValue = val;
+        //    //nBatches++;
+        //    //nOpsBatched += ops.size();
+        //    sendFlushMsgFlag=false;
+        //} else{
+        //    nextValue = new NoOpValue();
+        //    sendFlushMsgFlag=true;
+        //}
             
         
         
@@ -1715,11 +1713,15 @@ public class TPOChainProto extends GenericProtocol {
 
         //设置发送标记数
         hostSendConfigure.lastAcceptSent = instance.iN;
-        // 上次的刷新时间
+        //设置上次的刷新时间
         lastSendTime = System.currentTimeMillis();
         
         
         //同时向leader发送排序请求
+
+        // TODO: 2023/6/6  排序不发noop消息改成直接向全体节点发送ack
+        //  设置一个时钟,什么时候开启,什么时候关闭
+        
         OrderMSg orderMSg=new OrderMSg(self,instance.iN);
         sendOrEnqueue(orderMSg,supportedLeader());
     }
@@ -1765,7 +1767,7 @@ public class TPOChainProto extends GenericProtocol {
             return;
         }
 
-        
+        // FIXME: 2023/6/5 这里有问题：老是提示Discarding 重复 msg
         //  对消息重复的还需要处理
         //如果消息是新生成的那么,它的投票数为0,肯定不满足下面这个条件
         if (msg.nodeCounter<=instance.counter){
@@ -2291,10 +2293,7 @@ public class TPOChainProto extends GenericProtocol {
             }else {// leader不存在，无法排序
                 waitingAppOps.add(new AppOpBatch(not.getBatch()));
             }
-        }    
-        ////打算废弃
-        //else if (supportedLeader().equals(self))
-        //    waitingAppOps.add(new AppOpBatch(not.getBatch()));
+        }
         else //忽视接受的消息
             logger.warn("Received " + not + " without being FrontedNode, ignoring.");
     }
@@ -2315,7 +2314,6 @@ public class TPOChainProto extends GenericProtocol {
     private void uponMembershipOpRequestMsg(MembershipOpRequestMsg msg, Host from, short sourceProto, int channel) {
         if (amQuorumLeader)//不改，成员管理还是由leader负责
             sendNextAcceptCL(msg.op);
-        //打算废弃
         else if (supportedLeader().equals(self))
             waitingMembershipOps.add(msg.op);
         else
@@ -2430,14 +2428,14 @@ public class TPOChainProto extends GenericProtocol {
     }
 
 
+    
 
 
-    
-    
-    
-    
-    
-    
+
+    // todo 正因为这样在执行删除操作时，因进行 可能取消删除某节点操作  后面又添加这节点操作
+    //  maybeCancelPendingRemoval   maybeAddToPendingRemoval
+    //  因为新leader的选举成功  特别是消息的重发时，因为term变了，还得接受这个消息
+    //  对删除消息可能要重复执行
     
     
     
