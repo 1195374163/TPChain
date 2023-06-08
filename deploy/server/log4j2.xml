@@ -17,10 +17,12 @@
         <Logger level="info" name="pt.unl.fct.di.novasys.channel"/>
         <Logger level="info" name="pt.unl.fct.di.novasys.babel"/>
         <Logger level="info" name="chainpaxos"/>
+        <Logger level="info" name="TPOChain"/>
+        
 
         <Root level="INFO">
             <AppenderRef ref="Console" level="info"/>
-	    <AppenderRef ref="MyFile" level="info"/>
+	        <AppenderRef ref="MyFile" level="info"/>
         </Root>
     </Loggers>
 </Configuration>
