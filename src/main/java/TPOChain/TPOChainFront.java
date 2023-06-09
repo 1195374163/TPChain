@@ -41,16 +41,20 @@ public class TPOChainFront extends FrontendProto {
     private final Queue<Pair<Long, OpBatch>> pendingWrites;
     private final Queue<Pair<Long, List<byte[]>>> pendingReads;
     
+    // 读和写的锁
     private final Object readLock = new Object();
     private final Object writeLock = new Object();
+    
+    //消息的发往地
     private Host writesTo;
     private boolean writesToConnected;
     
+    //上次读写操作的计时
     private long lastWriteBatchTime;
     private long lastReadBatchTime;
     
-    //将用户请求打成批处理
-    //ToForward writes
+    
+    //ToForward writes将用户请求打成批处理
     private List<byte[]> writeDataBuffer;
     //ToSubmit reads
     private List<byte[]> readDataBuffer;
@@ -176,6 +180,7 @@ public class TPOChainFront extends FrontendProto {
      * 将写信息转发至writeTo即leader处理
      * */
     private void sendBatchToWritesTo(PeerBatchMessage msg) {
+        //logger.info("发送"+msg+"到"+writesTo);
         if (writesTo.getAddress().equals(self)) onPeerBatchMessage(msg, writesTo, getProtoId(), peerChannel);
         else if (writesToConnected) sendMessage(peerChannel, msg, writesTo);
     }
@@ -308,7 +313,7 @@ public class TPOChainFront extends FrontendProto {
                 logger.error("Expected " + not.getBatch().getBatchId() + ". Got " + ops + "\n" +
                         pendingWrites.stream().map(Pair::getKey).collect(Collectors.toList()));
                 throw new AssertionError("Expected " + not.getBatch().getBatchId() + ". Got " + ops);
-            }
+            }                                     
             not.getBatch().getOps().forEach(op -> app.executeOperation(op, true, not.getInstId()));
         } else {
             not.getBatch().getOps().forEach(op -> app.executeOperation(op, false, not.getInstId()));
