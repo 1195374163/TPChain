@@ -29,6 +29,8 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Collectors;
 
 public class TPOChainProto extends GenericProtocol {
@@ -191,15 +193,17 @@ public class TPOChainProto extends GenericProtocol {
     /**
      * 局部日志
      */
-    private final Map<Host,Map<Integer, InstanceState>> instances = new HashMap<>(INITIAL_MAP_SIZE);
+    private final ConcurrentMap<Host,ConcurrentMap<Integer, InstanceState>> instances = new ConcurrentHashMap<>(INITIAL_MAP_SIZE);
 
     /**
      * 全局日志
      */
-    private final Map<Integer, InstanceStateCL> globalinstances=new HashMap<>(INITIAL_MAP_SIZE);
+    private final ConcurrentMap<Integer, InstanceStateCL> globalinstances=new ConcurrentHashMap<>(INITIAL_MAP_SIZE);
 
-    
-    
+
+    // 加一个锁能对下面数据的访问:
+    // 对全局日志参数的访问
+    private final Object readLock = new Object();
     
     /**
      * leader这是主要排序阶段使用
@@ -222,7 +226,7 @@ public class TPOChainProto extends GenericProtocol {
      * 对节点的一些配置信息，主要是各前链节点分发的实例信息
      * 和 接收到accptcl的数量
      * */
-    private  Map<Host,RuntimeConfigure>  hostConfigureMap=new HashMap<>();
+    private  ConcurrentMap<Host,RuntimeConfigure>  hostConfigureMap=new ConcurrentHashMap<>();
 
 
     
@@ -498,7 +502,7 @@ public class TPOChainProto extends GenericProtocol {
 
             //局部日志进行初始化 
             //Map<Host,Map<Integer, InstanceState>> instances 
-            Map<Integer, InstanceState>  ins=new HashMap<>();
+            ConcurrentMap<Integer, InstanceState>  ins=new ConcurrentHashMap<>();
             instances.put(temp,ins);
         }
         //当判断当前节点是否为前链节点
@@ -1201,10 +1205,10 @@ public class TPOChainProto extends GenericProtocol {
                     for (int i = highestAcknowledgedInstanceCl + 1; i < inst.iN; i++) {
                         forwardCL(globalinstances.get(i));
                     }
-                    Iterator<Map.Entry<Host, Map<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
+                    Iterator<Map.Entry<Host, ConcurrentMap<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
                     while (outerIterator.hasNext()) {
                         // 获取外层 Map 的键值对
-                        Map.Entry<Host, Map<Integer, InstanceState>> outerEntry = outerIterator.next();
+                        Map.Entry<Host, ConcurrentMap<Integer, InstanceState>> outerEntry = outerIterator.next();
                         Host host = outerEntry.getKey();
                         //Map<Integer, InstanceState> innerMap = outerEntry.getValue();
                         for (int i = hostConfigureMap.get(host).highestAcknowledgedInstance + 1; i <=  hostConfigureMap.get(host).highestAcceptedInstance; i++) {
@@ -1229,10 +1233,10 @@ public class TPOChainProto extends GenericProtocol {
                     for (int i = highestAcknowledgedInstanceCl + 1; i < inst.iN; i++) {
                         forwardCL(globalinstances.get(i));
                     }
-                    Iterator<Map.Entry<Host, Map<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
+                    Iterator<Map.Entry<Host, ConcurrentMap<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
                     while (outerIterator.hasNext()) {
                         // 获取外层 Map 的键值对
-                        Map.Entry<Host, Map<Integer, InstanceState>> outerEntry = outerIterator.next();
+                        Map.Entry<Host, ConcurrentMap<Integer, InstanceState>> outerEntry = outerIterator.next();
                         Host host = outerEntry.getKey();
                         //Map<Integer, InstanceState> innerMap = outerEntry.getValue();
                         for (int i = hostConfigureMap.get(host).highestAcknowledgedInstance + 1; i <=  hostConfigureMap.get(host).highestAcceptedInstance; i++) {
@@ -1256,10 +1260,10 @@ public class TPOChainProto extends GenericProtocol {
                         for (int i = highestAcknowledgedInstanceCl + 1; i < inst.iN; i++) {
                             forwardCL(globalinstances.get(i));
                         }
-                        Iterator<Map.Entry<Host, Map<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
+                        Iterator<Map.Entry<Host, ConcurrentMap<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
                         while (outerIterator.hasNext()) {
                             // 获取外层 Map 的键值对
-                            Map.Entry<Host, Map<Integer, InstanceState>> outerEntry = outerIterator.next();
+                            Map.Entry<Host, ConcurrentMap<Integer, InstanceState>> outerEntry = outerIterator.next();
                             Host host = outerEntry.getKey();
                             //Map<Integer, InstanceState> innerMap = outerEntry.getValue();
                             for (int i = hostConfigureMap.get(host).highestAcknowledgedInstance + 1; i <=  hostConfigureMap.get(host).highestAcceptedInstance; i++) {
@@ -1298,10 +1302,10 @@ public class TPOChainProto extends GenericProtocol {
                 forwardCL(globalinstances.get(i));
             }
             
-            Iterator<Map.Entry<Host, Map<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
+            Iterator<Map.Entry<Host, ConcurrentMap<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
             while (outerIterator.hasNext()) {
                 // 获取外层 Map 的键值对
-                Map.Entry<Host, Map<Integer, InstanceState>> outerEntry = outerIterator.next();
+                Map.Entry<Host, ConcurrentMap<Integer, InstanceState>> outerEntry = outerIterator.next();
                 Host host = outerEntry.getKey();
                 //Map<Integer, InstanceState> innerMap = outerEntry.getValue();
                 //System.out.println("Host: " + host);
@@ -1335,10 +1339,10 @@ public class TPOChainProto extends GenericProtocol {
             // 对分发消息进行重发
             //Map<Host,Map<Integer, InstanceState>> instances
             // 局部配置表 hostConfigureMap.get();
-            Iterator<Map.Entry<Host, Map<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
+            Iterator<Map.Entry<Host, ConcurrentMap<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
             while (outerIterator.hasNext()) {
                 // 获取外层 Map 的键值对
-                Map.Entry<Host, Map<Integer, InstanceState>> outerEntry = outerIterator.next();
+                Map.Entry<Host, ConcurrentMap<Integer, InstanceState>> outerEntry = outerIterator.next();
                 Host host = outerEntry.getKey();
                 //Map<Integer, InstanceState> innerMap = outerEntry.getValue();
                 //System.out.println("Host: " + host);
@@ -1363,10 +1367,10 @@ public class TPOChainProto extends GenericProtocol {
             // 对分发消息进行重发
             //Map<Host,Map<Integer, InstanceState>> instances
             // 局部配置表 hostConfigureMap.get();
-            Iterator<Map.Entry<Host, Map<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
+            Iterator<Map.Entry<Host, ConcurrentMap<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
             while (outerIterator.hasNext()) {
                 // 获取外层 Map 的键值对
-                Map.Entry<Host, Map<Integer, InstanceState>> outerEntry = outerIterator.next();
+                Map.Entry<Host, ConcurrentMap<Integer, InstanceState>> outerEntry = outerIterator.next();
                 Host host = outerEntry.getKey();
                 Map<Integer, InstanceState> innerMap = outerEntry.getValue();
                 //System.out.println("Host: " + host);
@@ -2456,16 +2460,17 @@ public class TPOChainProto extends GenericProtocol {
             for (int i = highestAcknowledgedInstanceCl + 1; i <= highestAcceptedInstanceCl; i++) {
                 forwardCL(globalinstances.get(i));
             }
-            // TODO: 2023/6/1 这里只转发ack及以上消息对吗？ 
-            Iterator<Map.Entry<Host, Map<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
-            while (outerIterator.hasNext()) {
-                // 获取外层 Map 的键值对
-                Map.Entry<Host, Map<Integer, InstanceState>> outerEntry = outerIterator.next();
-                Host host = outerEntry.getKey();
-                for (int i = hostConfigureMap.get(host).highestAcknowledgedInstance + 1; i <=  hostConfigureMap.get(host).highestAcceptedInstance; i++) {
-                    forward(instances.get(host).get(i));
-                }
-            }
+            // FIXME: 2023/6/9 还需要转发分发消息
+            //// TODO: 2023/6/1 这里只转发ack及以上消息对吗？ 
+            //Iterator<Map.Entry<Host, Map<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
+            //while (outerIterator.hasNext()) {
+            //    // 获取外层 Map 的键值对
+            //    Map.Entry<Host, Map<Integer, InstanceState>> outerEntry = outerIterator.next();
+            //    Host host = outerEntry.getKey();
+            //    for (int i = hostConfigureMap.get(host).highestAcknowledgedInstance + 1; i <=  hostConfigureMap.get(host).highestAcceptedInstance; i++) {
+            //        forward(instances.get(host).get(i));
+            //    }
+            //}
         }
     }
 
