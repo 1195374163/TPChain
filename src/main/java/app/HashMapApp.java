@@ -190,7 +190,7 @@ public class HashMapApp implements Application {
                         }
                     }).option(ChannelOption.SO_BACKLOG, 128)
                     .childOption(ChannelOption.SO_KEEPALIVE, true);;//给workerGroup的EventLoop对应的管道设置处理器
-            logger.info("绑定端口号，启动服务端");
+            //logger.info("绑定端口号，启动服务端");
             ChannelFuture f = b.bind(port).sync();//绑定端口号，启动服务端
             logger.debug("Listening: " + f.channel().localAddress());
             f.channel().closeFuture().sync(); //对关闭通道进行监听

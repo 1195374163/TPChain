@@ -486,7 +486,7 @@ public class TPOChainProto extends GenericProtocol {
         // 对排序的下一个节点准备，打算在这里
         nextOkFront =membership.nextLivingInFrontedChain(self);
         nextOkBack=membership.nextLivingInBackChain(self);
-        logger.info("nextOkFront是"+nextOkFront+";nextOkBack是"+nextOkBack);
+        logger.info("setupInitialState()方法中nextOkFront是"+nextOkFront+";nextOkBack是"+nextOkBack);
         
         //next   应该调用了outConnectionUp事件
         members.stream().filter(h -> !h.equals(self)).forEach(this::openConnection);
@@ -507,6 +507,7 @@ public class TPOChainProto extends GenericProtocol {
         }
         //当判断当前节点是否为前链节点
         if(membership.frontChainContain(self)){
+            logger.debug("我是前链节点，开始做前链初始操作frontChainNodeAction()");
             frontChainNodeAction();
         }
     }
@@ -529,6 +530,7 @@ public class TPOChainProto extends GenericProtocol {
         //对下一个消息节点进行重设 
         nextOkFront =membership.nextLivingInFrontedChain(self);
         nextOkBack=membership.nextLivingInBackChain(self);
+        logger.debug("在frontChainNodeAction()nextOkFront是"+nextOkFront+"; nextOkBack是"+nextOkBack);
     }
 
 
@@ -573,7 +575,7 @@ public class TPOChainProto extends GenericProtocol {
 
             //局部日志进行初始化 
             //Map<Host,Map<Integer, InstanceState>> instances 
-            Map<Integer, InstanceState>  ins=new HashMap<>();
+            ConcurrentMap<Integer, InstanceState>  ins=new ConcurrentHashMap<>();
             instances.put(temp,ins);
         }
         //当判断当前节点是否为前链节点
@@ -604,7 +606,6 @@ public class TPOChainProto extends GenericProtocol {
      */
     private void onLeaderTimer(LeaderTimer timer, long timerId) {
         // 在进入超时,说明失去leader之间的联系
-        canHandleQequest=false;
         if (!amQuorumLeader && (System.currentTimeMillis() - lastLeaderOp > LEADER_TIMEOUT) &&
                 (supportedLeader() == null //初始为空  ，或新加入节点
                         //Not required, avoids joining nodes from ending in the first half of
@@ -625,6 +626,7 @@ public class TPOChainProto extends GenericProtocol {
     private void tryTakeLeadership() { //Take leadership, send prepare
         logger.info("Attempting to take leadership...");
         assert !amQuorumLeader;
+        
         //这instances是Map<Integer, InstanceState> instances
         //currentSN是Map.Entry<Integer, SeqN>类型数据
         //为什么是ack信息，保证日志的连续
@@ -992,8 +994,8 @@ public class TPOChainProto extends GenericProtocol {
         if (amQuorumLeader) {
             assert waitingAppOps.isEmpty() && waitingMembershipOps.isEmpty();
             if (System.currentTimeMillis() - lastAcceptTimeCl > NOOP_SEND_INTERVAL)
+                logger.debug("leader 时钟超时自动发送noop消息");
                 sendNextAcceptCL(new NoOpValue());
-                logger.debug("leader自动发送noop消息");
         } else {
             logger.warn(timer + " while not quorumLeader");
             cancelTimer(noOpTimerCL);
@@ -1625,7 +1627,7 @@ public class TPOChainProto extends GenericProtocol {
             if (!instances.containsKey(target)){
                 //局部日志进行初始化 
                 //Map<Host,Map<Integer, InstanceState>> instances 
-                Map<Integer, InstanceState>  ins=new HashMap<>();
+                ConcurrentMap<Integer, InstanceState>  ins=new ConcurrentHashMap<>();
                 instances.put(target,ins);
             }
 
