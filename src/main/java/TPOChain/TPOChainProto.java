@@ -205,6 +205,8 @@ public class TPOChainProto extends GenericProtocol {
     // 对全局日志参数的访问
     private final Object readLock = new Object();
     
+    private  final  Object executeLock = new Object();
+    
     /**
      * leader这是主要排序阶段使用
      * */
@@ -1062,8 +1064,7 @@ public class TPOChainProto extends GenericProtocol {
             }
         } else if ( val.type== PaxosValue.Type.NO_OP){
             nextValue = new NoOpValue();
-        }
-        else if (val.type== PaxosValue.Type.SORT){
+        } else if (val.type== PaxosValue.Type.SORT){
             nextValue =val;  
         }
 
@@ -1521,9 +1522,11 @@ public class TPOChainProto extends GenericProtocol {
         // 进行ack信息的更新
         // 使用++ 还是直接赋值好 
         highestAcknowledgedInstanceCl++;
-        
-        
-        execute();
+
+        synchronized (executeLock) {
+            execute();
+        }
+       
         // 是使用调用处循环，还是方法内部使用循环?  外部使用
         //for (int i=highestExecuteInstanceCl+1;i<= instanceN;i++){
         //    if (globalinstances.get(i).acceptedValue.type!= PaxosValue.Type.SORT){
@@ -2023,7 +2026,10 @@ public class TPOChainProto extends GenericProtocol {
         // 试图推进程序的执行
         //  2023/6/6 这里需要修改,应该尝试执行总序列
         //ackInstanceCL(highestAcknowledgedInstanceCl);
-        execute();
+        //execute();
+        synchronized (executeLock) {
+            execute();
+        }
     }
 
     
