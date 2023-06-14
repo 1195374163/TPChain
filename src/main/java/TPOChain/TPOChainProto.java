@@ -1523,9 +1523,9 @@ public class TPOChainProto extends GenericProtocol {
         // 使用++ 还是直接赋值好 
         highestAcknowledgedInstanceCl++;
 
-        synchronized (executeLock) {
+        //synchronized (executeLock) {
             execute();
-        }
+        //}
        
         // 是使用调用处循环，还是方法内部使用循环?  外部使用
         //for (int i=highestExecuteInstanceCl+1;i<= instanceN;i++){
@@ -1665,6 +1665,7 @@ public class TPOChainProto extends GenericProtocol {
             if (globalInstanceTemp.acceptedValue.type!= PaxosValue.Type.SORT){
                 // 那消息可能是成员管理消息  也可能是noop消息
                 highestExecuteInstanceCl++;
+                logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+globalInstanceTemp.acceptedValue);
                 gcAndRead(i,globalInstanceTemp,null,-1);
             }else {// 是排序消息
                 SortValue sortTarget= (SortValue)globalInstanceTemp.acceptedValue;
@@ -1672,8 +1673,15 @@ public class TPOChainProto extends GenericProtocol {
                 int  iNtarget=sortTarget.getiN();
                 InstanceState ins= tagetMap.get(iNtarget);
                 //如果分发消息不为空就可以执行
-                if (ins == null){
+                if (ins == null ||  ins.acceptedValue ==null){
                 //if (ins == null || !ins.isDecided()){
+                    if (ins==null){
+                        logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+sortTarget+";对应的分发实例为空");    
+                    }
+                    else{
+                        logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+sortTarget+";对应的分发实例为"+ins);
+                    }
+                    
                     return ;// 不能进行执行,结束执行
                 }
                 // 分发消息是一个刷新消息
@@ -1682,7 +1690,7 @@ public class TPOChainProto extends GenericProtocol {
                 //    gcAndRead(i,target,iNtarget);
                 //    continue;
                 //}
-
+                
                 triggerNotification(new ExecuteBatchNotification(((AppOpBatch) ins.acceptedValue).getBatch()));
                 highestExecuteInstanceCl++;
                 gcAndRead(i,globalInstanceTemp,tagetMap,iNtarget);
@@ -2027,9 +2035,9 @@ public class TPOChainProto extends GenericProtocol {
         //  2023/6/6 这里需要修改,应该尝试执行总序列
         //ackInstanceCL(highestAcknowledgedInstanceCl);
         //execute();
-        synchronized (executeLock) {
-            execute();
-        }
+        //synchronized (executeLock) {
+        //    execute();
+        //}
     }
 
     
@@ -2041,7 +2049,8 @@ public class TPOChainProto extends GenericProtocol {
         //assert !instance.isDecided();
         
         instance.markDecided();
-        hostConfigureMap.get(instance.highestAccept.getNode()).highestDecidedInstance++;
+        // TODO: 2023/6/14   这里将将不更新decide值
+        //hostConfigureMap.get(instance.highestAccept.getNode()).highestDecidedInstance++;
 
         // 上面是decide的，只对其进行了标记
         //logger.debug("Decided: " + instance.iN + " - " + instance.acceptedValue);

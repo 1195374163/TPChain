@@ -13,18 +13,22 @@
     </properties>
 
     <repositories>
+<!--        <repository>-->
+<!--            <id>jitpack.io</id>-->
+<!--            <url>https://jitpack.io</url>-->
+<!--        </repository>-->
         <repository>
-            <id>jitpack.io</id>
-            <url>https://jitpack.io</url>
+            <id>github-rich-repo</id>
+            <name>The Maven Repository on Github</name>
+            <url>https://github.com/1195374163/babel-core-plus/maven-repo/</url>
         </repository>
     </repositories>
 
     <dependencies>
         <dependency>
-            <groupId>com.github.pfouto</groupId>
+            <groupId>pt.unl.fct.di.novasys</groupId>
             <artifactId>babel-core</artifactId>
-<!--            <version>0.4.46</version>-->
-            <version>0.5.01</version>
+            <version>0.6.01</version>
         </dependency>
         <dependency>
             <groupId>org.apache.zookeeper</groupId>
