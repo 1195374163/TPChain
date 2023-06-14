@@ -1775,6 +1775,7 @@ public class TPOChainProto extends GenericProtocol {
     private   Map<Integer, InstanceState> sendInstanceMap=null;
     private   RuntimeConfigure  hostSendConfigure=null;
     
+    
     // 上面这个是前链节点转发消息需要执行的操作
     /**
      * 处理accept信息
@@ -1788,8 +1789,8 @@ public class TPOChainProto extends GenericProtocol {
         }
         logger.debug("接收到来自"+from+"的AcceptMsg:"+msg);
         // 得到分发消息的来源节点
-        sender=msg.sN.getNode();
-        sendInstanceMap=instances.get(sender);
+         sender=msg.sN.getNode();
+         sendInstanceMap=instances.get(sender);
         
         // 得到对应的日志项
         InstanceState instance = sendInstanceMap.computeIfAbsent(msg.iN, InstanceState::new);
