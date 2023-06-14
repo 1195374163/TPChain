@@ -205,8 +205,6 @@ public class TPOChainProto extends GenericProtocol {
     // 对全局日志参数的访问
     private final Object readLock = new Object();
     
-    private  final  Object executeLock = new Object();
-    
     /**
      * leader这是主要排序阶段使用
      * */
