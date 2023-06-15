@@ -193,14 +193,14 @@ public class TPOChainProto extends GenericProtocol {
     /**
      * 局部日志
      */
-    private final ConcurrentMap<Host,ConcurrentMap<Integer, InstanceState>> instances = new ConcurrentHashMap<>(INITIAL_MAP_SIZE);
+    private final Map<Host,ConcurrentMap<Integer, InstanceState>> instances = new HashMap<>(INITIAL_MAP_SIZE);
 
     /**
      * 全局日志
      */
-    private final ConcurrentMap<Integer, InstanceStateCL> globalinstances=new ConcurrentHashMap<>(INITIAL_MAP_SIZE);
+    private final Map<Integer, InstanceStateCL> globalinstances=new HashMap<>(INITIAL_MAP_SIZE);
 
-
+    
     // 加一个锁能对下面数据的访问:
     // 对全局日志参数的访问
     private final Object readLock = new Object();
@@ -226,8 +226,9 @@ public class TPOChainProto extends GenericProtocol {
      * 对节点的一些配置信息，主要是各前链节点分发的实例信息
      * 和 接收到accptcl的数量
      * */
-    private  ConcurrentMap<Host,RuntimeConfigure>  hostConfigureMap=new ConcurrentHashMap<>();
-
+    private  Map<Host,RuntimeConfigure>  hostConfigureMap=new HashMap<>();
+    
+    private  int  threadid;
 
     
     
@@ -526,6 +527,7 @@ public class TPOChainProto extends GenericProtocol {
         amFrontedNode = true;
         //无leader时，不能处理事务
         canHandleQequest=false;
+        threadid=membership.frontIndexOf(self)+1;
         
         //对下一个消息节点进行重设 
         nextOkFront =membership.nextLivingInFrontedChain(self);
@@ -1028,7 +1030,7 @@ public class TPOChainProto extends GenericProtocol {
      */
     private void uponOrderMSg(OrderMSg msg, Host from, short sourceProto, int channel) {
         if (amQuorumLeader){//只有leader才能处理这个排序请求
-            logger.debug("我是leader收到来自"+from+"的排序信息:"+msg);
+            logger.debug("我是leader收到"+from+"的排序信息:"+msg+"开始sendNextAcceptCL()");
             sendNextAcceptCL(new SortValue(msg.node,msg.iN));
         }else {//对消息进行转发,转发到leader
             sendOrEnqueue(msg,supportedLeader());
@@ -1061,7 +1063,8 @@ public class TPOChainProto extends GenericProtocol {
                 nextValue = next;
             }
         } else if ( val.type== PaxosValue.Type.NO_OP){
-            nextValue = new NoOpValue();
+            //nextValue = new NoOpValue();
+            nextValue=val;
         } else if (val.type== PaxosValue.Type.SORT){
             nextValue =val;  
         }
@@ -1088,7 +1091,7 @@ public class TPOChainProto extends GenericProtocol {
             return;
         }
         
-        logger.debug("收到来自"+from+"的AcceptCLMsg:"+msg);
+        logger.debug("收到"+from+"的:"+msg);
         InstanceStateCL instance = globalinstances.computeIfAbsent(msg.iN, InstanceStateCL::new);
         
         //"Discarding decided msg"  重复而且消息已经决定了
@@ -1450,46 +1453,27 @@ public class TPOChainProto extends GenericProtocol {
      * decide并执行Execute实例
      * */
     private void decideAndExecuteCL(InstanceStateCL instance) {
-        assert highestDecidedInstanceCl == instance.iN - 1;
-        assert !instance.isDecided();
+        //assert highestDecidedInstanceCl == instance.iN - 1;
+        //assert !instance.isDecided();
 
         instance.markDecided();
         highestDecidedInstanceCl++;
         logger.debug("Decided: " + instance.iN + " - " + instance.acceptedValue);
 
+        
         //Actually execute message
         if (instance.acceptedValue.type == PaxosValue.Type.SORT) {
             if (state == TPOChainProto.State.ACTIVE){
-                //在全局日志中既包含了成员管理  no_op  也包含了 排序信息
-                // 这里只筛选出 包含
-                //判断类型
-                //for (int i=highestExecuteInstanceCl+1;i<= highestDecidedInstanceCl;i++){
-                //    if (globalinstances.get(i).acceptedValue.type!= PaxosValue.Type.SORT){
-                //        highestExecuteInstanceCl++;
-                //        //continue;
-                //    }else {
-                //        SortValue sortTarget= (SortValue)globalinstances.get(i).acceptedValue;
-                //        Host target=sortTarget.getNode();
-                //        int  iNtarget=sortTarget.getiN();
-                //        //  hashMap没有这个东西会不会返回null 
-                //        InstanceState ins= instances.get(target).get(iNtarget);
-                //        if (ins == null || ins.isDecided()==false){
-                //            return ;
-                //        }
-                //       
-                //    }
-                //}
-                //triggerNotification(new ExecuteBatchNotification(((AppOpBatch) instance.acceptedValue).getBatch()));
-                /*
-                * 什么也不做等待ack()时执行相关的命令
-                * */
+                execute();
             } else  //在节点处于加入join之后，暂存存放的批处理命令
                 // TODO: 2023/6/1 这里不对，在加入节点时，不能执行这个 
                 bufferedOps.add((SortValue) instance.acceptedValue);
         } else if (instance.acceptedValue.type == PaxosValue.Type.MEMBERSHIP) {
             executeMembershipOp(instance);
+            execute();
         } else if (instance.acceptedValue.type == PaxosValue.Type.NO_OP) {
             //nothing
+            execute();
         }
     }
     
@@ -1499,6 +1483,7 @@ public class TPOChainProto extends GenericProtocol {
      * 对于ack包括以前的消息执行
      * */
     private void ackInstanceCL(int instanceN) {
+        //处理初始情况
         if (instanceN<0){
             return ;
         }
@@ -1520,56 +1505,21 @@ public class TPOChainProto extends GenericProtocol {
         // 进行ack信息的更新
         // 使用++ 还是直接赋值好 
         highestAcknowledgedInstanceCl++;
-
-        //synchronized (executeLock) {
-            execute();
-        //}
-       
-        // 是使用调用处循环，还是方法内部使用循环?  外部使用
-        //for (int i=highestExecuteInstanceCl+1;i<= instanceN;i++){
-        //    if (globalinstances.get(i).acceptedValue.type!= PaxosValue.Type.SORT){
-        //        // 那消息可能是成员管理消息  也可能是noop消息
-        //        highestExecuteInstanceCl++;
-        //        gcAndRead(i,null,-1);
-        //    }else {// 是排序消息
-        //        SortValue sortTarget= (SortValue)globalinstances.get(i).acceptedValue;
-        //        Host target=sortTarget.getNode();
-        //        int  iNtarget=sortTarget.getiN();
-        //        InstanceState ins= instances.get(target).get(iNtarget);
-        //        if (ins == null || !ins.isDecided()){
-        //            
-        //            return ;// 不能进行执行,结束执行
-        //        }
-        //        // 分发消息是一个刷新消息
-        //        //if (ins.acceptedValue.type== PaxosValue.Type.NO_OP){
-        //        //    highestExecuteInstanceCl++;
-        //        //    gcAndRead(i,target,iNtarget);
-        //        //    continue;
-        //        //}
-        //        //这里的条件是
-        //        triggerNotification(new ExecuteBatchNotification(((AppOpBatch) ins.acceptedValue).getBatch()));
-        //        
-        //        highestExecuteInstanceCl++;
-        //        
-        //        gcAndRead(i,target,iNtarget);
-        //        // FIXME: 2023/6/6 这里有bug,不能在分发实例被decide时删除
-        //        //  应该在ack时才能删除
-        //    }
-        //}
-
-       
-        //先执行上面的代码，先更新状态，
-  
         
-        //For everyone
-        //for (int i = highestAcknowledgedInstanceCl + 1; i <= instanceN; i++) {
-        //    InstanceStateCL ins = globalinstances.remove(i);//垃圾收集
-        //    ins.getAttachedReads().forEach((k, v) -> sendReply(new ExecuteReadReply(v, ins.iN), k));
-        //    assert ins.isDecided();
-        //    //更新ack信息
-        //    highestAcknowledgedInstanceCl++;
-        //    assert highestAcknowledgedInstanceCl == i;
-        //}
+        //execute();
+        
+        //当ack小于等于exec，进行GC清理
+        if (highestAcknowledgedInstanceCl<=highestExecuteInstanceCl){
+            InstanceStateCL ins = globalinstances.get(highestAcknowledgedInstanceCl);
+            if (ins.acceptedValue.type!= PaxosValue.Type.SORT){
+                gcAndRead(highestAcknowledgedInstanceCl,ins,null,-1);
+            }else {
+                SortValue sortTarget= (SortValue)ins.acceptedValue;
+                Map<Integer, InstanceState>  tagetMap=instances.get(sortTarget.getNode());
+                int  iNtarget=sortTarget.getiN();
+                gcAndRead(highestAcknowledgedInstanceCl,ins,tagetMap,iNtarget);
+            }
+        }
     }
 
     // FIXME: 2023/6/2 这里有bug:老是弹出Ignoring acceptAck for old instance: 提示
@@ -1579,8 +1529,7 @@ public class TPOChainProto extends GenericProtocol {
     private void uponAcceptAckCLMsg(AcceptAckCLMsg msg, Host from, short sourceProto, int channel) {
         // FIXME: 2023/6/5  这里有问题，老是提示“Ignoring acceptAckCL for old instance”
         
-        
-        logger.debug("接收来自"+from+"的AckCLMsg:"+msg);
+        logger.debug("接收"+from+"的"+msg);
         if (msg.instanceNumber <= highestAcknowledgedInstanceCl) {
             logger.warn("Ignoring acceptAckCL for old instance: " + msg);
             return;
@@ -1591,6 +1540,7 @@ public class TPOChainProto extends GenericProtocol {
             logger.error("Received Ack without being leader...");
             throw new AssertionError("Received Ack without being leader...");
         }
+        
         // Fixme 这里下面两行调了顺序
         ackInstanceCL(msg.instanceNumber);
         if (inst.acceptedValue.type != PaxosValue.Type.NO_OP)
@@ -1654,17 +1604,18 @@ public class TPOChainProto extends GenericProtocol {
     // 全局日志的已经ack到当前decided之间的消息进行扫描，达到命令执行的要求
     // 从execute到ack的开始执行
     
-    
     //按照全局日志表执行命令:执行的是用户请求命令
     private void execute(){
         // 是使用调用处循环，还是方法内部使用循环?  外部使用
-        for (int i=highestExecuteInstanceCl+1;i<= highestAcknowledgedInstanceCl;i++){
+        for (int i=highestExecuteInstanceCl+1;i<= highestDecidedInstanceCl;i++){
             InstanceStateCL  globalInstanceTemp=globalinstances.get(i);
             if (globalInstanceTemp.acceptedValue.type!= PaxosValue.Type.SORT){
                 // 那消息可能是成员管理消息  也可能是noop消息
                 highestExecuteInstanceCl++;
                 logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+globalInstanceTemp.acceptedValue);
-                gcAndRead(i,globalInstanceTemp,null,-1);
+                if (i<highestAcknowledgedInstanceCl){
+                    gcAndRead(i,globalInstanceTemp,null,-1);
+                }
             }else {// 是排序消息
                 SortValue sortTarget= (SortValue)globalInstanceTemp.acceptedValue;
                 Map<Integer, InstanceState>  tagetMap=instances.get(sortTarget.getNode());
@@ -1679,7 +1630,6 @@ public class TPOChainProto extends GenericProtocol {
                     else{
                         logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+sortTarget+";对应的分发实例为"+ins);
                     }
-                    
                     return ;// 不能进行执行,结束执行
                 }
                 // 分发消息是一个刷新消息
@@ -1691,7 +1641,10 @@ public class TPOChainProto extends GenericProtocol {
                 
                 triggerNotification(new ExecuteBatchNotification(((AppOpBatch) ins.acceptedValue).getBatch()));
                 highestExecuteInstanceCl++;
-                gcAndRead(i,globalInstanceTemp,tagetMap,iNtarget);
+                if (i<highestAcknowledgedInstanceCl){
+                    gcAndRead(i,globalInstanceTemp,tagetMap,iNtarget);
+                }
+                
                 // FIXME: 2023/6/6 这里有bug,不能在分发实例被decide时删除
                 //  应该在ack时才能删除
             }
@@ -1728,43 +1681,25 @@ public class TPOChainProto extends GenericProtocol {
      *在当前节点是前链节点时处理，发送 或Noop 或App_Batch信息
      * */
     private void sendNextAccept(PaxosValue val) {
+        //设置上次的刷新时间：上次发送时间 
+        lastSendTime = System.currentTimeMillis();
+        
         //因为新消息会附带以往的ack消息,所以取消刷新的消息
         cancelTimer(frontflushMsgTimer);
         
         // 先得到自己节点的配置信息
         RuntimeConfigure  hostSendConfigure= hostConfigureMap.get(self);
         
-        //当sent标记和ack相等，说明开启新的一轮分发，要开启时钟，同时将标记时间为当前时间
-        //if (hostSendConfigure.lastAcceptSent == hostSendConfigure.highestAcknowledgedInstance){
-        //   
-        //}
-        
-        
         InstanceState instance = instances.get(self).computeIfAbsent(hostSendConfigure.lastAcceptSent+1, InstanceState::new);
-        assert instance.acceptedValue == null && instance.highestAccept == null;
-        
+        //assert instance.acceptedValue == null && instance.highestAccept == null;
         
         PaxosValue nextValue=val;
-        //if (val.type == PaxosValue.Type.APP_BATCH) {
-        //    nextValue = val;
-        //    //nBatches++;
-        //    //nOpsBatched += ops.size();
-        //    sendFlushMsgFlag=false;
-        //} else{
-        //    nextValue = new NoOpValue();
-        //    sendFlushMsgFlag=true;
-        //}
-            
+        
+        //对当前的生成自己的seqn,以线程通道id为count，self为标记
+        SeqN newterm=new SeqN(threadid,self);
         
         
-        //对当前的生成自己的seqn,以term为期，self为标记
-        //SeqN newterm=new SeqN(currentSN.getValue().getCounter(),self);
-        SeqN newterm=new SeqN(0,self);
-
-
-        //同时向leader发送排序请求:
-        //  排序不发noop消息改成直接向全体节点发送ack
-        //  设置一个时钟,什么时候开启,什么时候关闭
+        //同时向leader发送排序请求:排序不发noop消息改成直接向全体节点发送ack设置一个时钟,什么时候开启,什么时候关闭
         OrderMSg orderMSg=new OrderMSg(self,instance.iN);
         sendOrEnqueue(orderMSg,supportedLeader());
         
@@ -1772,20 +1707,12 @@ public class TPOChainProto extends GenericProtocol {
         // 先发给自己:这里直接使用对应方法
         this.uponAcceptMsg(new AcceptMsg(instance.iN, newterm,
                 (short) 0, nextValue,hostSendConfigure.highestAcknowledgedInstance), self, this.getProtoId(), peerChannel);
-
         
         //设置发送标记数
         hostSendConfigure.lastAcceptSent = instance.iN;
-        //设置上次的刷新时间
-        lastSendTime = System.currentTimeMillis();
     }
     
-    private   Host sender=null;
-    private   Map<Integer, InstanceState> sendInstanceMap=null;
-    private   RuntimeConfigure  hostSendConfigure=null;
     
-    
-    // 上面这个是前链节点转发消息需要执行的操作
     /**
      * 处理accept信息
      */
@@ -1796,56 +1723,58 @@ public class TPOChainProto extends GenericProtocol {
             sendMessage(new UnaffiliatedMsg(), from, TCPChannel.CONNECTION_IN);
             return;
         }
-        logger.debug("接收到来自"+from+"的AcceptMsg:"+msg);
-        // 得到分发消息的来源节点
-         sender=msg.sN.getNode();
-         sendInstanceMap=instances.get(sender);
         
-        // 得到对应的日志项
+        
+        
+        logger.debug("接收到"+from+"的"+msg);
+        
+        
+        // 得到分发消息的来源节点
+        Host sender=msg.sN.getNode();
+        Map<Integer, InstanceState> sendInstanceMap=instances.get(sender);
         InstanceState instance = sendInstanceMap.computeIfAbsent(msg.iN, InstanceState::new);
         
         
         //"Discarding decided msg" 当instance
-        if (instance.isDecided()) {
-            logger.warn("Discarding decided acceptmsg");
-            return;
-        }
-        
-        
-        //如果消息是新生成的那么,它的投票数为0,肯定不满足下面这个条件
-        if (msg.nodeCounter+1<=instance.counter){
-            logger.warn("Discarding 重复 acceptmsg");
-            return;
-        }
-        
-        // 废弃 对于重发的消息丢弃
-        //if (msg.nodeCounter <= instance.counter) {
-        //    logger.warn("Discarding since same sN & leader, while counter <=");
+        //if (instance.isDecided()) {
+        //    logger.warn("Discarding decided acceptmsg");
         //    return;
         //}
-
+        
+        //如果消息是新生成的那么,它的投票数为0,肯定不满足下面这个条件，若是重发的则直接满足条件进行丢弃
+        if (msg.nodeCounter+1<=instance.counter){
+            logger.warn("Discarding 已经在局部表存在的acceptmsg");
+            return;
+        }
+        
+        
         // 先得到排序commandleader节点的配置信息
-        hostSendConfigure= hostConfigureMap.get(sender);
-
+        RuntimeConfigure hostSendConfigure= hostConfigureMap.get(sender);
         
-        hostSendConfigure.lastAcceptTime = System.currentTimeMillis();//进行更新领导操作时间
-        
-        instance.accept(msg.sN, msg.value, (short) (msg.nodeCounter + 1));//进行对实例的确定
+        //进行更新领导操作时间
+        hostSendConfigure.lastAcceptTime = System.currentTimeMillis();
 
+        //进行对实例的确定
+        instance.accept(msg.sN, msg.value, (short) (msg.nodeCounter + 1));
+        
+        
         //更新highestAcceptedInstance信息
-        if ( hostSendConfigure.highestAcceptedInstance < instance.iN) {
+        if (hostSendConfigure.highestAcceptedInstance < instance.iN) {
             hostSendConfigure.highestAcceptedInstance++;
             assert hostConfigureMap.get(sender).highestAcceptedInstance == instance.iN;
         }
-        
-        forward(instance);//转发下一个节点
 
+        //  先转发，还是先ack，应该携带的ack是消息中自带的ack，而不是自己的 
+        forward(instance);//转发下一个节点
+        
+        
         // 前段节点没有decide ，后端节点已经decide，
         //if (!instance.isDecided() && instance.counter >= QUORUM_SIZE) //We have quorum!
         //    decideAndExecute(instance);//决定并执行实例
         
         if (msg.ack>hostSendConfigure.highestAcknowledgedInstance){
-            ackInstance(sender,msg.ack);//对于之前的实例进行ack并进行垃圾收集
+            //对于之前的实例进行ack并进行垃圾收集
+            ackInstance(sender,msg.ack);
         }
     }
 
@@ -1854,49 +1783,12 @@ public class TPOChainProto extends GenericProtocol {
      * 转发accept信息给下一个节点
      * */
     private void forward(InstanceState inst) {
-        // some cases no longer happen (like leader being removed)
-        //if (!membership.contains(inst.highestAccept.getNode())) {
-        //    logger.error("Received accept from removed node (?)");
-        //    throw new AssertionError("Received accept from removed node (?)");
-        //}
-        
-        //if (nextOkFront==null && nextOkBack==null) { //am last 只有最理想的情况下：有后链链尾尾节点会这样
-        //    //If last in chain than we must have decided (unless F+1 dead/inRemoval)
-        //    if (inst.counter < QUORUM_SIZE) {
-        //        logger.error("Last living in chain cannot decide. Are f+1 nodes dead/inRemoval? "
-        //                + inst.counter);
-        //        throw new AssertionError("Last living in chain cannot decide. " +
-        //                "Are f+1 nodes dead/inRemoval? " + inst.counter);
-        //    }
-        //    // TODO: 2023/5/29   进行判断 inst.highestAccept.getNode() 是否已经不在系统中了
-        //    sendMessage(new AcceptAckMsg(inst.iN), inst.highestAccept.getNode());
-        //} else {
-        //    if (inst.counter < QUORUM_SIZE){// 投票数不满F+1，发往nextOkFront
-        //        //not last in chain...
-        //        AcceptMsg msg = new AcceptMsg(inst.iN, inst.highestAccept, inst.counter, inst.acceptedValue,
-        //                hostConfigureMap.get(inst.highestAccept.getNode()).highestAcknowledgedInstance);
-        //        sendMessage(msg, nextOkFront);
-        //    } else {// 投票数大于等于F+1，发往nextOkBack
-        //        //若后链节点为空，则说明到链尾，发送ack信息
-        //        if (nextOkBack==null){
-        //            sendMessage(new AcceptAckMsg(inst.iN), inst.highestAccept.getNode());
-        //        }else {//有后链节点
-        //            //not last in chain...
-        //            AcceptMsg msg = new AcceptMsg(inst.iN, inst.highestAccept, inst.counter, inst.acceptedValue,
-        //                    hostConfigureMap.get(inst.highestAccept.getNode()).highestAcknowledgedInstance);
-        //            sendMessage(msg, nextOkBack);
-        //        }
-        //    }
-        //}
-
-
-
+        // TODO: 2023/6/15  只有前链的情况还没解除注释
         // TODO: 2023/5/29 如果分发消息的节点已经不在集群中，则对全部的节点发送对应消息的ack 
         // 这里需要修改  不能使用满足F+1 ，才能发往下一个节点，
         //  若一个节点故障，永远不会满足F+1,应该使用逻辑链前链是否走完
-
         //有两种情况属于链尾:一种是只有前链  一种是有后链
-
+        
         
         // && membership.getFrontChainTail(inst.highestAccept.getNode()).equals(self)
         // 因为这个节点可能缺失
@@ -1933,9 +1825,16 @@ public class TPOChainProto extends GenericProtocol {
         //    }
         //}
 
+        
+        
+        
         //下面是有后链的情况
         
         //这说明是有后链，而且此节点还是后链的尾节点
+        
+        
+        Host sendHost=inst.highestAccept.getNode();
+        //到达链尾发送acceptack信息
         if (nextOkFront==null && nextOkBack==null) {
             if (inst.counter < QUORUM_SIZE) {
                 logger.error("Last living in chain cannot decide. Are f+1 nodes dead/inRemoval? "
@@ -1944,22 +1843,21 @@ public class TPOChainProto extends GenericProtocol {
                         "Are f+1 nodes dead/inRemoval? " + inst.counter);
             }
             // 下面已经说明投票数大于等于F+1
-            Host sendHost=inst.highestAccept.getNode();
+            int  idsendtothread=inst.highestAccept.getCounter();
             if (membership.isAlive(sendHost)){
-                AcceptAckMsg acceptAckMsgtemp=new AcceptAckMsg(sendHost,inst.iN);
+                AcceptAckMsg acceptAckMsgtemp=new AcceptAckMsg(sendHost,idsendtothread,inst.iN);
                 sendMessage(acceptAckMsgtemp,sendHost);
-                logger.debug("向"+sendHost+"发送"+acceptAckMsgtemp);
+                logger.debug("后链末尾向"+sendHost+"发送"+acceptAckMsgtemp);
                 return;
             }else {
-                AcceptAckMsg acceptAckMsgtemp=new AcceptAckMsg(sendHost,inst.iN);
+                AcceptAckMsg acceptAckMsgtemp=new AcceptAckMsg(sendHost,5,inst.iN);
                 membership.getMembers().forEach(host -> sendMessage(acceptAckMsgtemp,host));
-                logger.debug("向全体成员"+membership.getMembers()+"发送"+acceptAckMsgtemp);
+                logger.debug("后链末尾向全体成员"+membership.getMembers()+"发送"+acceptAckMsgtemp);
                 return;
             }
         }
         
         
-        Host  sendHost=inst.highestAccept.getNode();
         //正常转发有两种情况： 在前链中转发  在后链中转发
         AcceptMsg msg = new AcceptMsg(inst.iN, inst.highestAccept, inst.counter, inst.acceptedValue,
                 hostConfigureMap.get(sendHost).highestAcknowledgedInstance);
@@ -1967,14 +1865,14 @@ public class TPOChainProto extends GenericProtocol {
             //membership.get
             if (inst.counter < QUORUM_SIZE   ){// 投票数不满F+1，发往nextOkFront
                 sendMessage(msg, nextOkFront);
-                logger.debug("此节点是前链,现在向"+nextOkFront+"转发AcceptMsg:"+msg);
+                logger.debug("此节点是前链,现在向前链"+nextOkFront+"转发"+msg);
             } else{ //当等于inst.count==F+1 ,可以发往后链节点
                 sendMessage(msg, nextOkBack);
-                logger.debug("此节点是前链,现在向"+nextOkBack+"转发AcceptMsg:"+msg);
+                logger.debug("此节点是前链,现在向后链"+nextOkBack+"转发"+msg);
             }
         } else {//此节点是后链
             sendMessage(msg, nextOkBack);
-            logger.debug("此节点是后链,现在向"+nextOkBack+"转发AcceptMsg:"+msg);
+            logger.debug("此节点是后链,现在向后链"+nextOkBack+"转发"+msg);
         }
     }
     
@@ -1988,88 +1886,36 @@ public class TPOChainProto extends GenericProtocol {
             return;
         }
         
-        
         // 先得到排序commandleader节点的配置信息
         RuntimeConfigure  hostSendConfigure= hostConfigureMap.get(sendHost);
         
-        
         //处理重复消息或过时
         if (instanceN<=hostSendConfigure.highestAcknowledgedInstance){
-            logger.info("Discarding 重复 acceptackmsg"+instanceN+"当前的acceptack是"+sendHost+hostSendConfigure.highestAcknowledgedInstance);
+            logger.info("Discarding 重复的 acceptackmsg;当前节点是"+sendHost +"当前的要确定的序号是"+instanceN+"当前的acceptack序号是"+hostSendConfigure.highestAcknowledgedInstance);
             return;
         }
-        
-        
+
+        hostSendConfigure.highestAcknowledgedInstance++;
         // 对于前链节点先进行deccide
         //For nodes in the first half of the chain only
-        for (int i = hostSendConfigure.highestDecidedInstance + 1; i <= instanceN; i++) {
-            InstanceState ins = instances.get(sendHost).get(i);
-            if (ins!=null){
-                //assert !ins.isDecided();
-                decideAndExecute(ins);
-                //assert highestDecidedInstanceCl == i;
-            }
-        }
-        
-        
-        hostSendConfigure.highestAcknowledgedInstance++;
-        
-        // 其他节点在得到noop信息之后开启一段时间，自动对noop信息进行ack 
-        //  因为noop的时钟已经关闭，
-        //   这里是接收到noop的ack信息。
-        //   在发送完一次noop消息得到他的ack消息
-
-        //数据结构 Map<Host,Map<Integer, InstanceState>> instances;
-        //if (self.equals(sendHost) && sendFlushMsgFlag){
-        //    // 但ack赶上sent时结束闹钟 
-        //    if(hostConfigureMap.get(self).highestAcknowledgedInstance +1 == hostConfigureMap.get(self).lastAcceptSent) {
-        //        hostConfigureMap.get(self).highestAcknowledgedInstance++;
-        //        cancelTimer(frontflushMsgTimer);
+        //for (int i = hostSendConfigure.highestDecidedInstance + 1; i <= instanceN; i++) {
+        //    InstanceState ins = instances.get(sendHost).get(i);
+        //    if (ins!=null){
+        //        //assert !ins.isDecided();
+        //        decideAndExecute(hostSendConfigure,ins);
+        //        //assert highestDecidedInstanceCl == i;
         //    }
         //}
-
-        // 因为有新的分发实例的确认,那程序
-        // 试图推进程序的执行
-        //  2023/6/6 这里需要修改,应该尝试执行总序列
-        //ackInstanceCL(highestAcknowledgedInstanceCl);
-        //execute();
-        //synchronized (executeLock) {
-        //    execute();
-        //}
     }
-
+    
     
     /**
      * decide并执行Execute实例
      * */
-    private void decideAndExecute(InstanceState instance) {
-        //assert hostConfigureMap.get(self).highestDecidedInstance == instance.iN - 1;
-        //assert !instance.isDecided();
-        
+    private void decideAndExecute(RuntimeConfigure  hostSendConfigure,InstanceState instance) {
         instance.markDecided();
-        // TODO: 2023/6/14   这里将将不更新decide值
-        //hostConfigureMap.get(instance.highestAccept.getNode()).highestDecidedInstance++;
-
-        // 上面是decide的，只对其进行了标记
-        //logger.debug("Decided: " + instance.iN + " - " + instance.acceptedValue);
-
-
-        //Actually execute message
-        // 接下来是执行
-        //   需要等待排序命令一块到达才可以执行，触发一次排序命令的执行，因为
-        //  排序命令缺少分发命令停止了一些执行
-        //execute();
-        //if (instance.acceptedValue.type == PaxosValue.Type.APP_BATCH) {
-        //    if (state == TPOChainProto.State.ACTIVE)
-        //        triggerNotification(new ExecuteBatchNotification(((AppOpBatch) instance.acceptedValue).getBatch()));
-        //    else
-        //        bufferedOps.add((AppOpBatch) instance.acceptedValue);
-        //} else if (instance.acceptedValue.type != PaxosValue.Type.NO_OP) {
-        //    logger.error("Trying to execute unknown paxos value: " + instance.acceptedValue);
-        //    throw new AssertionError("Trying to execute unknown paxos value: " + instance.acceptedValue);
-        //}
+        hostSendConfigure.highestDecidedInstance++;
     }
-    // TODO: 2023/6/6 这里需要修改 
     
     
     /**
@@ -2078,7 +1924,8 @@ public class TPOChainProto extends GenericProtocol {
     private void uponAcceptAckMsg(AcceptAckMsg msg, Host from, short sourceProto, int channel) {
         //除了发送节点可以接受acceptack信息,其他节点也可以接受acceptack信息,因为
         // 发送节点可能宕机,所以开放其他节点的接受ack信息
-        logger.debug("接收来自" + from + "的AcceptAckMsg:"+msg);
+        logger.debug("接收" + from + "的:"+msg);
+        
         Host ackHost=msg.node;
         RuntimeConfigure ackHostRuntimeConfigure= hostConfigureMap.get(ackHost);
         if (msg.instanceNumber<=ackHostRuntimeConfigure.highestAcknowledgedInstance){
@@ -2086,11 +1933,10 @@ public class TPOChainProto extends GenericProtocol {
             return;
         }
         
-        
         // 执行ack程序
         ackInstance(msg.node,msg.instanceNumber);
-
-
+        
+        
         //这里设置一个定时器,发送acceptack,一段时间没有后续要发的 
         // 在发送新实例时在sendnextaccpt取消
         //如果当前节点等于消息的发送节点,
@@ -2100,15 +1946,15 @@ public class TPOChainProto extends GenericProtocol {
             lastSendTime = System.currentTimeMillis();
         }
     }
-
-
+    
+    
     /**
      * 对最后的此节点的消息进行发送ack信息  FlushMsgTimer
      * */
     private void onFlushMsgTimer(FlushMsgTimer timer, long timerId) {
         if (amFrontedNode) {
             if (System.currentTimeMillis() - lastSendTime > NOOP_SEND_INTERVAL){
-                membership.getMembers().stream().filter(h -> !h.equals(self)).forEach(host -> sendMessage(new AcceptAckMsg(self,hostConfigureMap.get(self).highestAcknowledgedInstance),host));
+                membership.getMembers().stream().filter(h -> !h.equals(self)).forEach(host -> sendMessage(new AcceptAckMsg(self,threadid,hostConfigureMap.get(self).highestAcknowledgedInstance),host));
                 logger.debug("向所有节点发送了acceptack为"+hostConfigureMap.get(self).highestAcknowledgedInstance+"的定时信息");
                 //发完acceptack消息之后应该结束时钟
                 cancelTimer(frontflushMsgTimer);
@@ -2118,6 +1964,9 @@ public class TPOChainProto extends GenericProtocol {
             cancelTimer(frontflushMsgTimer);
         }
     }
+    
+    
+    
     
     
     
@@ -2370,6 +2219,8 @@ public class TPOChainProto extends GenericProtocol {
 
 
 
+    
+    
 
     //TODO 在节点候选时
     // waitingAppOps   waitingMembershipOps接收正常操作 
@@ -2388,10 +2239,10 @@ public class TPOChainProto extends GenericProtocol {
             if (canHandleQequest){//这个标志意味着leader存在
                 //先将以往的消息转发
                 // 还有其他候选者节点存储的消息
+                logger.debug("接收来自front层的批处理并开始处理sendNextAccept():"+not.getBatch());
                 sendNextAccept(new AppOpBatch(not.getBatch()));
-                logger.debug("接收来自上层的批处理:"+"not.getBatch()");
             }else {// leader不存在，无法排序
-                logger.debug("因为现在还没有leader,缓存来自上层的批处理:"+"not.getBatch()");
+                logger.debug("因为现在还没有leader,缓存来自front的批处理:"+not.getBatch());
                 waitingAppOps.add(new AppOpBatch(not.getBatch()));
             }
         } else //忽视接受的消息

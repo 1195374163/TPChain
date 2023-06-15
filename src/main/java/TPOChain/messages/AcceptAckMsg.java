@@ -14,11 +14,13 @@ public class AcceptAckMsg extends ProtoMessage {
 
     public  final  Host node;
     public final int instanceNumber;
+    public   final  int  threadid;
     
     
-    public AcceptAckMsg(Host node,int instanceNumber) {
+    public AcceptAckMsg(Host node,int threadid,int instanceNumber) {
         super(MSG_CODE);
         this.node=node;
+        this.threadid=threadid;
         this.instanceNumber = instanceNumber;
     }
 
@@ -26,20 +28,24 @@ public class AcceptAckMsg extends ProtoMessage {
     public String toString() {
         return "AcceptAckMsg{" +
                 "node="+ node +
+                "threadid="+ threadid +
                 "instanceNumber=" + instanceNumber +
                 '}';
     }
 
+    
     public static ISerializer<? extends ProtoMessage> serializer = new ISerializer<AcceptAckMsg>() {
         public void serialize(AcceptAckMsg msg, ByteBuf out) throws IOException {
             Host.serializer.serialize(msg.node,out);
+            out.writeInt(msg.threadid);
             out.writeInt(msg.instanceNumber);
         }
 
         public AcceptAckMsg deserialize(ByteBuf in) throws IOException {
             Host node=Host.serializer.deserialize(in);
+            int  threadid=in.readInt();
             int instanceNumber = in.readInt();
-            return new AcceptAckMsg(node,instanceNumber);
+            return new AcceptAckMsg(node,threadid,instanceNumber);
         }
     };
 }

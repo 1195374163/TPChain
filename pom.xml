@@ -13,6 +13,7 @@
     </properties>
 
     <repositories>
+<!--        原版的依赖的仓库的地址-->
 <!--        <repository>-->
 <!--            <id>jitpack.io</id>-->
 <!--            <url>https://jitpack.io</url>-->
@@ -25,11 +26,19 @@
     </repositories>
 
     <dependencies>
+<!--        这个是原版的babel-core-->
+        <!--        <dependency>-->
+        <!--            <groupId>com.github.pfouto</groupId>-->
+        <!--            <artifactId>babel-core</artifactId>-->
+        <!--            <version>0.4.46</version>-->
+        <!--        </dependency>-->
         <dependency>
             <groupId>pt.unl.fct.di.novasys</groupId>
             <artifactId>babel-core</artifactId>
             <version>0.6.01</version>
         </dependency>
+
+        
         <dependency>
             <groupId>org.apache.zookeeper</groupId>
             <artifactId>zookeeper</artifactId>
