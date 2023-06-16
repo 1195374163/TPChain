@@ -228,7 +228,7 @@ public class TPOChainProto extends GenericProtocol {
      * */
     private  Map<Host,RuntimeConfigure>  hostConfigureMap=new HashMap<>();
     
-    private  int  threadid;
+    private  short  threadid;
 
     
     
@@ -527,7 +527,7 @@ public class TPOChainProto extends GenericProtocol {
         amFrontedNode = true;
         //无leader时，不能处理事务
         canHandleQequest=false;
-        threadid=membership.frontIndexOf(self)+1;
+        threadid= (short) (membership.frontIndexOf(self)+1);
         threadID =threadid;
         
         //对下一个消息节点进行重设 
@@ -1160,7 +1160,7 @@ public class TPOChainProto extends GenericProtocol {
              ackInstanceCL(msg.ack);//对于之前的实例进行ack并进行垃圾收集
     }
 
-  
+    // TODO: 2023/6/16 这里将内容 
     /**
      *标记要删除的节点
      * */
@@ -1168,10 +1168,10 @@ public class TPOChainProto extends GenericProtocol {
         MembershipOp op = (MembershipOp) inst.acceptedValue;
         // TODO: 2023/5/18  2023年5月18日16:05:09考虑消息的重发：是不是所有消息都要重发，有些可能不受影响 
         //   具体来说  哪一个next节点改动就转发对应的消息，不需要全部转发
-        
+
         // 当删除节点是前链节点
         if (membership.frontChainContain(op.affectedHost) ){
-            if (membership.frontChainContain(self) == false){//是后链
+            if (!membership.frontChainContain(self)){//是后链
                 Host  backTail=membership.getBackChainHead();
                 if (backTail.equals(self)){//当前节点是后链链首
                     // TODO: 2023/5/18  要进行转换成前链节点标志
@@ -1180,7 +1180,7 @@ public class TPOChainProto extends GenericProtocol {
                     // 修改next节点
                     nextOkBack=membership.nextLivingInBackChain(self);
                     nextOkFront=membership.nextLivingInFrontedChain(self);
-                    
+
                     //修改成前链节点需要的操作
                     //设置时钟
                     leaderTimeoutTimer = setupPeriodicTimer(LeaderTimer.instance, LEADER_TIMEOUT, LEADER_TIMEOUT / 3);
@@ -1210,7 +1210,8 @@ public class TPOChainProto extends GenericProtocol {
                         Host host = outerEntry.getKey();
                         //Map<Integer, InstanceState> innerMap = outerEntry.getValue();
                         for (int i = hostConfigureMap.get(host).highestAcknowledgedInstance + 1; i <=  hostConfigureMap.get(host).highestAcceptedInstance; i++) {
-                            forward(instances.get(host).get(i));
+                            short threadid=(short)(membership.frontIndexOf(host)+1);
+                            forward(instances.get(host).get(i),threadid);
                         }
                     }
                 }else{//不是自己的next节点
@@ -1238,7 +1239,8 @@ public class TPOChainProto extends GenericProtocol {
                         Host host = outerEntry.getKey();
                         //Map<Integer, InstanceState> innerMap = outerEntry.getValue();
                         for (int i = hostConfigureMap.get(host).highestAcknowledgedInstance + 1; i <=  hostConfigureMap.get(host).highestAcceptedInstance; i++) {
-                            forward(instances.get(host).get(i));
+                            short threadid=(short)(membership.frontIndexOf(host)+1);
+                            forward(instances.get(host).get(i),threadid);
                         }
                     }
                 }else {//当前节点是后链其他节点
@@ -1265,7 +1267,8 @@ public class TPOChainProto extends GenericProtocol {
                             Host host = outerEntry.getKey();
                             //Map<Integer, InstanceState> innerMap = outerEntry.getValue();
                             for (int i = hostConfigureMap.get(host).highestAcknowledgedInstance + 1; i <=  hostConfigureMap.get(host).highestAcceptedInstance; i++) {
-                                forward(instances.get(host).get(i));
+                                short threadid=(short)(membership.frontIndexOf(host)+1);
+                                forward(instances.get(host).get(i),threadid);
                             }
                         }
                     }else {
@@ -1276,7 +1279,7 @@ public class TPOChainProto extends GenericProtocol {
             }
         }
 
-        
+
         //在这里对后链链首元素进行更改：转变成前链节点
         if (membership.nextLivingInBackChain(op.affectedHost).equals(self)){
             //拥有了设置选举leader的资格
@@ -1288,18 +1291,18 @@ public class TPOChainProto extends GenericProtocol {
             amFrontedNode = true;
             //无leader时，不能处理事务
             canHandleQequest=true;
-            
+
             membership.addToPendingRemoval(op.affectedHost);
-            
-            
+
+
             //对下一个消息节点进行重设 
             nextOkFront =membership.nextLivingInFrontedChain(self);
             nextOkBack=membership.nextLivingInBackChain(self);
-            
+
             for (int i = highestAcknowledgedInstanceCl + 1; i < inst.iN; i++) {
                 forwardCL(globalinstances.get(i));
             }
-            
+
             Iterator<Map.Entry<Host, ConcurrentMap<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
             while (outerIterator.hasNext()) {
                 // 获取外层 Map 的键值对
@@ -1308,22 +1311,23 @@ public class TPOChainProto extends GenericProtocol {
                 //Map<Integer, InstanceState> innerMap = outerEntry.getValue();
                 //System.out.println("Host: " + host);
                 for (int i = hostConfigureMap.get(host).highestAcknowledgedInstance + 1; i <=  hostConfigureMap.get(host).highestAcceptedInstance; i++) {
-                    forward(instances.get(host).get(i));
+                    short threadid=(short)(membership.frontIndexOf(host)+1);
+                    forward(instances.get(host).get(i),threadid);
                 }
             }
             return;
         }else {
             membership.addToPendingRemoval(op.affectedHost);
         }
-        
-        
+
+
         // 前链节点 nextOkFront  和   nextOkBack  都不为空
         // 后链节点非链尾的话  nextOkFront为空  nextOkBack不为空
         // 后链链尾的话，nextOkFront  nextOkBack 都为空
-        
-        
+
+
         //一个节点故障只会影响nextOkFront nextOkBack 其中之一，不会两个都影响
-        
+
         // 下面节点只在前链非leader触发
         // 对当前之前的消息进行转发，不包含当前信息，因为之后的forward会对当前的消息进行转发
         if (nextOkFront!=null && nextOkFront.equals(op.affectedHost)){
@@ -1345,14 +1349,15 @@ public class TPOChainProto extends GenericProtocol {
                 //Map<Integer, InstanceState> innerMap = outerEntry.getValue();
                 //System.out.println("Host: " + host);
                 for (int i = hostConfigureMap.get(host).highestAcknowledgedInstance + 1; i <=  hostConfigureMap.get(host).highestAcceptedInstance; i++) {
-                    forward(instances.get(host).get(i));
+                    short threadid=(short)(membership.frontIndexOf(host)+1);
+                    forward(instances.get(host).get(i),threadid);
                 }
             }
-            
+
             //因为将原链首元素移至删除节点的位置
             nextOkBack=membership.nextLivingInBackChain(self);
         }
-        
+
         //下面在后链链首 后链中间节点  后链链尾
         if (nextOkBack !=null && nextOkBack.equals(op.affectedHost)){
             nextOkBack=membership.nextLivingInBackChain(self);
@@ -1373,11 +1378,11 @@ public class TPOChainProto extends GenericProtocol {
                 Map<Integer, InstanceState> innerMap = outerEntry.getValue();
                 //System.out.println("Host: " + host);
                 for (int i = hostConfigureMap.get(host).highestAcknowledgedInstance + 1; i <=  hostConfigureMap.get(host).highestAcceptedInstance ; i++) {
-                    forward(instances.get(host).get(i));
+                    short threadid=(short)(membership.frontIndexOf(host)+1);
+                    forward(instances.get(host).get(i),threadid);
                 }
             }
         }else{
-            
         }
     }
     
@@ -1690,7 +1695,7 @@ public class TPOChainProto extends GenericProtocol {
         
         
         sendOrEnqueue(new AcceptMsg(instance.iN, newterm,
-                (short) 0, nextValue,hostSendConfigure.highestAcknowledgedInstance),self);
+                (short) 0, nextValue,hostSendConfigure.highestAcknowledgedInstance,threadid),self);
         //设置发送标记数
         hostSendConfigure.lastAcceptSent = instance.iN;
     }
@@ -1706,7 +1711,6 @@ public class TPOChainProto extends GenericProtocol {
             sendMessage(new UnaffiliatedMsg(), from, TCPChannel.CONNECTION_IN);
             return;
         }
-        
         
         
         logger.debug("接收到"+from+"的"+msg);
@@ -1748,7 +1752,7 @@ public class TPOChainProto extends GenericProtocol {
         }
 
         //  先转发，还是先ack，应该携带的ack是消息中自带的ack，而不是自己的 
-        forward(instance);//转发下一个节点
+        forward(instance,msg.threadid);//转发下一个节点
         
         
         // 前段节点没有decide ，后端节点已经decide，
@@ -1765,7 +1769,7 @@ public class TPOChainProto extends GenericProtocol {
     /**
      * 转发accept信息给下一个节点
      * */
-    private void forward(InstanceState inst) {
+    private void forward(InstanceState inst,short threadid) {
         // TODO: 2023/6/15  只有前链的情况还没解除注释
         // TODO: 2023/5/29 如果分发消息的节点已经不在集群中，则对全部的节点发送对应消息的ack 
         // 这里需要修改  不能使用满足F+1 ，才能发往下一个节点，
@@ -1814,8 +1818,6 @@ public class TPOChainProto extends GenericProtocol {
         //下面是有后链的情况
         
         //这说明是有后链，而且此节点还是后链的尾节点
-        
-        
         Host sendHost=inst.highestAccept.getNode();
         //到达链尾发送acceptack信息
         if (nextOkFront==null && nextOkBack==null) {
@@ -1828,12 +1830,12 @@ public class TPOChainProto extends GenericProtocol {
             // 下面已经说明投票数大于等于F+1
             int  idsendtothread=inst.highestAccept.getCounter();
             if (membership.isAlive(sendHost)){
-                AcceptAckMsg acceptAckMsgtemp=new AcceptAckMsg(sendHost,idsendtothread,inst.iN);
+                AcceptAckMsg acceptAckMsgtemp=new AcceptAckMsg(sendHost,threadid,inst.iN);
                 sendMessage(acceptAckMsgtemp,sendHost);
                 logger.debug("后链末尾向"+sendHost+"发送"+acceptAckMsgtemp);
                 return;
             }else {
-                AcceptAckMsg acceptAckMsgtemp=new AcceptAckMsg(sendHost,5,inst.iN);
+                AcceptAckMsg acceptAckMsgtemp=new AcceptAckMsg(sendHost,threadid,inst.iN);
                 membership.getMembers().forEach(host -> sendMessage(acceptAckMsgtemp,host));
                 logger.debug("后链末尾向全体成员"+membership.getMembers()+"发送"+acceptAckMsgtemp);
                 return;
@@ -1843,7 +1845,7 @@ public class TPOChainProto extends GenericProtocol {
         
         //正常转发有两种情况： 在前链中转发  在后链中转发
         AcceptMsg msg = new AcceptMsg(inst.iN, inst.highestAccept, inst.counter, inst.acceptedValue,
-                hostConfigureMap.get(sendHost).highestAcknowledgedInstance);
+                hostConfigureMap.get(sendHost).highestAcknowledgedInstance,threadid);
         if (nextOkFront!=null){//此节点是前链
             //membership.get
             if (inst.counter < QUORUM_SIZE   ){// 投票数不满F+1，发往nextOkFront

@@ -13,25 +13,21 @@ public class AcceptMsg extends ProtoMessage {
 
     public static final short MSG_CODE = 202;
     
-    
     public final int iN;
-
     public final SeqN sN;
     public final PaxosValue value;
     public final short nodeCounter;
     public final int ack;
     
 
-    public AcceptMsg(int iN,SeqN sN, short nodeCounter, PaxosValue value, int ack) {
+    public AcceptMsg(int iN,SeqN sN, short nodeCounter, PaxosValue value, int ack,short threadid) {
         super(MSG_CODE);
-
         this.iN = iN;
-        
         this.sN = sN;
         this.value = value;
-        
         this.nodeCounter = nodeCounter;
         this.ack = ack;
+        this.threadid=threadid;//这里继承了父类的变量
     }
 
     @Override
@@ -42,6 +38,7 @@ public class AcceptMsg extends ProtoMessage {
                 ", value=" + value +
                 ", nodeCounter=" + nodeCounter +
                 ", ack=" + ack +
+                ", threadid=" + threadid +
                 '}';
     }
 
@@ -52,6 +49,7 @@ public class AcceptMsg extends ProtoMessage {
             out.writeShort(msg.nodeCounter);
             PaxosValue.serializer.serialize(msg.value, out);
             out.writeInt(msg.ack);
+            out.writeShort(msg.threadid);
         }
 
         public AcceptMsg deserialize(ByteBuf in) throws IOException {
@@ -60,7 +58,8 @@ public class AcceptMsg extends ProtoMessage {
             short nodeCount = in.readShort();
             PaxosValue payload = PaxosValue.serializer.deserialize(in);
             int ack = in.readInt();
-            return new AcceptMsg(instanceNumber,sN, nodeCount, payload, ack);
+            short  threadid=in.readShort();
+            return new AcceptMsg(instanceNumber,sN, nodeCount, payload, ack,threadid);
         }
     };
 }

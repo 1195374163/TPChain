@@ -18,7 +18,6 @@ public class InstanceState {
     private boolean decided;
     
     
-    
     public InstanceState(int iN) {
         this.iN = iN;
         this.highestAccept = null;

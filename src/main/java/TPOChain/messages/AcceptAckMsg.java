@@ -11,16 +11,14 @@ import java.io.IOException;
 public class AcceptAckMsg extends ProtoMessage {
 
     public static final short MSG_CODE = 201;
-
     public  final  Host node;
     public final int instanceNumber;
-    public   final  int  threadid;
     
     
-    public AcceptAckMsg(Host node,int threadid,int instanceNumber) {
+    public AcceptAckMsg(Host node,short threadid,int instanceNumber) {
         super(MSG_CODE);
         this.node=node;
-        this.threadid=threadid;
+        this.threadid=threadid;//这里继承了父类的变量
         this.instanceNumber = instanceNumber;
     }
 
@@ -37,13 +35,13 @@ public class AcceptAckMsg extends ProtoMessage {
     public static ISerializer<? extends ProtoMessage> serializer = new ISerializer<AcceptAckMsg>() {
         public void serialize(AcceptAckMsg msg, ByteBuf out) throws IOException {
             Host.serializer.serialize(msg.node,out);
-            out.writeInt(msg.threadid);
+            out.writeShort(msg.threadid);
             out.writeInt(msg.instanceNumber);
         }
 
         public AcceptAckMsg deserialize(ByteBuf in) throws IOException {
             Host node=Host.serializer.deserialize(in);
-            int  threadid=in.readInt();
+            short threadid=in.readShort();
             int instanceNumber = in.readInt();
             return new AcceptAckMsg(node,threadid,instanceNumber);
         }
