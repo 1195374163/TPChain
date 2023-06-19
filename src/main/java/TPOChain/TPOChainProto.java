@@ -1233,10 +1233,10 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                     for (int i = highestAcknowledgedInstanceCl + 1; i < inst.iN; i++) {
                         forwardCL(globalinstances.get(i));
                     }
-                    Iterator<Map.Entry<Host, ConcurrentMap<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
+                    Iterator<Map.Entry<Host, Map<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
                     while (outerIterator.hasNext()) {
                         // 获取外层 Map 的键值对
-                        Map.Entry<Host, ConcurrentMap<Integer, InstanceState>> outerEntry = outerIterator.next();
+                        Map.Entry<Host, Map<Integer, InstanceState>> outerEntry = outerIterator.next();
                         Host host = outerEntry.getKey();
                         //Map<Integer, InstanceState> innerMap = outerEntry.getValue();
                         for (int i = hostConfigureMap.get(host).highestAcknowledgedInstance + 1; i <=  hostConfigureMap.get(host).highestAcceptedInstance; i++) {
@@ -1262,10 +1262,10 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                     for (int i = highestAcknowledgedInstanceCl + 1; i < inst.iN; i++) {
                         forwardCL(globalinstances.get(i));
                     }
-                    Iterator<Map.Entry<Host, ConcurrentMap<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
+                    Iterator<Map.Entry<Host, Map<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
                     while (outerIterator.hasNext()) {
                         // 获取外层 Map 的键值对
-                        Map.Entry<Host, ConcurrentMap<Integer, InstanceState>> outerEntry = outerIterator.next();
+                        Map.Entry<Host, Map<Integer, InstanceState>> outerEntry = outerIterator.next();
                         Host host = outerEntry.getKey();
                         //Map<Integer, InstanceState> innerMap = outerEntry.getValue();
                         for (int i = hostConfigureMap.get(host).highestAcknowledgedInstance + 1; i <=  hostConfigureMap.get(host).highestAcceptedInstance; i++) {
@@ -1290,10 +1290,10 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                         for (int i = highestAcknowledgedInstanceCl + 1; i < inst.iN; i++) {
                             forwardCL(globalinstances.get(i));
                         }
-                        Iterator<Map.Entry<Host, ConcurrentMap<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
+                        Iterator<Map.Entry<Host, Map<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
                         while (outerIterator.hasNext()) {
                             // 获取外层 Map 的键值对
-                            Map.Entry<Host, ConcurrentMap<Integer, InstanceState>> outerEntry = outerIterator.next();
+                            Map.Entry<Host, Map<Integer, InstanceState>> outerEntry = outerIterator.next();
                             Host host = outerEntry.getKey();
                             //Map<Integer, InstanceState> innerMap = outerEntry.getValue();
                             for (int i = hostConfigureMap.get(host).highestAcknowledgedInstance + 1; i <=  hostConfigureMap.get(host).highestAcceptedInstance; i++) {
@@ -1333,10 +1333,10 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                 forwardCL(globalinstances.get(i));
             }
 
-            Iterator<Map.Entry<Host, ConcurrentMap<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
+            Iterator<Map.Entry<Host, Map<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
             while (outerIterator.hasNext()) {
                 // 获取外层 Map 的键值对
-                Map.Entry<Host, ConcurrentMap<Integer, InstanceState>> outerEntry = outerIterator.next();
+                Map.Entry<Host, Map<Integer, InstanceState>> outerEntry = outerIterator.next();
                 Host host = outerEntry.getKey();
                 //Map<Integer, InstanceState> innerMap = outerEntry.getValue();
                 //System.out.println("Host: " + host);
@@ -1371,10 +1371,10 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             // 对分发消息进行重发
             //Map<Host,Map<Integer, InstanceState>> instances
             // 局部配置表 hostConfigureMap.get();
-            Iterator<Map.Entry<Host, ConcurrentMap<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
+            Iterator<Map.Entry<Host, Map<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
             while (outerIterator.hasNext()) {
                 // 获取外层 Map 的键值对
-                Map.Entry<Host, ConcurrentMap<Integer, InstanceState>> outerEntry = outerIterator.next();
+                Map.Entry<Host, Map<Integer, InstanceState>> outerEntry = outerIterator.next();
                 Host host = outerEntry.getKey();
                 //Map<Integer, InstanceState> innerMap = outerEntry.getValue();
                 //System.out.println("Host: " + host);
@@ -1400,10 +1400,10 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             // 对分发消息进行重发
             //Map<Host,Map<Integer, InstanceState>> instances
             // 局部配置表 hostConfigureMap.get();
-            Iterator<Map.Entry<Host, ConcurrentMap<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
+            Iterator<Map.Entry<Host, Map<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
             while (outerIterator.hasNext()) {
                 // 获取外层 Map 的键值对
-                Map.Entry<Host, ConcurrentMap<Integer, InstanceState>> outerEntry = outerIterator.next();
+                Map.Entry<Host, Map<Integer, InstanceState>> outerEntry = outerIterator.next();
                 Host host = outerEntry.getKey();
                 Map<Integer, InstanceState> innerMap = outerEntry.getValue();
                 //System.out.println("Host: " + host);

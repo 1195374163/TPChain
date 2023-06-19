@@ -5,10 +5,7 @@ import TPOChain.messages.AcceptMsg;
 import TPOChain.messages.OrderMSg;
 import TPOChain.messages.UnaffiliatedMsg;
 import TPOChain.timers.FlushMsgTimer;
-import TPOChain.utils.InstanceState;
-import TPOChain.utils.RuntimeConfigure;
-import TPOChain.utils.SeqN;
-import TPOChain.utils.ShareDistrubutedInstances;
+import TPOChain.utils.*;
 import chainpaxos.timers.ReconnectTimer;
 import common.values.AppOpBatch;
 import common.values.PaxosValue;
@@ -22,20 +19,17 @@ import org.apache.logging.log4j.Logger;
 import pt.unl.fct.di.novasys.babel.core.Babel;
 import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
 import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
+import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
+import pt.unl.fct.di.novasys.babel.internal.BabelMessage;
+import pt.unl.fct.di.novasys.babel.internal.MessageInEvent;
 import pt.unl.fct.di.novasys.channel.tcp.TCPChannel;
-import pt.unl.fct.di.novasys.channel.tcp.events.OutConnectionDown;
-import pt.unl.fct.di.novasys.channel.tcp.events.OutConnectionFailed;
-import pt.unl.fct.di.novasys.channel.tcp.events.OutConnectionUp;
+import pt.unl.fct.di.novasys.channel.tcp.events.*;
 import pt.unl.fct.di.novasys.network.data.Host;
 
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.*;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.ConcurrentMap;
-import java.util.stream.Collectors;
-
 
 
 public class TPOChainData extends GenericProtocol  implements ShareDistrubutedInstances {
@@ -53,18 +47,30 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     public static final String RECONNECT_TIME_KEY = "reconnect_time";
     public static final String NOOP_INTERVAL_KEY = "noop_interval";
 
-
+    public static final String QUORUM_SIZE_KEY = "quorum_size";
+    
+    
+    
 
     private final int NOOP_SEND_INTERVAL;
     private final int RECONNECT_TIME;
+
+    
     
 
-    // 系统中的成员
-    protected List<InetAddress> membership; 
+    //系统中的成员：端口号和控制层的协议层不一致
+    protected Membership membership;
+    private final int QUORUM_SIZE;
     
     
     //前链连接和后链连接
     private Host  self;  
+    
+    //leader 向leader发送排序请求，这里的端口号是50300而不是自己的50600 
+    private Host  leader;
+    private boolean leaderConnected;
+    
+    
     private Host nextOkFront;
     private boolean nextOkFrontConnected;
     private Host nextOkBack;
@@ -108,6 +114,9 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     // 还有一个field ： System.currentTimeMillis(); 隐含了系统的当前时间
 
 
+    
+    //是前链但还不能处理请求的暂存队列
+    private final Queue<AppOpBatch> waitingAppOps = new LinkedList<>();
 
     
     private int peerChannel;
@@ -132,11 +141,17 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         //不管是排序还是分发消息：标记下一个节点
         nextOkFront =null;
         nextOkBack=null;
+        leader=null;
+
+        nextOkFrontConnected=false;
+        nextOkBackConnected=false;
+        leaderConnected=false;
         
         
         
         this.RECONNECT_TIME = Integer.parseInt(props.getProperty(RECONNECT_TIME_KEY));
         this.NOOP_SEND_INTERVAL = Integer.parseInt(props.getProperty(NOOP_INTERVAL_KEY));
+        this.QUORUM_SIZE = Integer.parseInt(props.getProperty(QUORUM_SIZE_KEY));
     }
 
     
@@ -148,18 +163,54 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         peerChannel = createChannel(TCPChannel.NAME, peerProps);
         setDefaultChannel(peerChannel);
 
+
+
+        registerMessageSerializer(peerChannel, AcceptAckMsg.MSG_CODE, AcceptAckMsg.serializer);
+        registerMessageSerializer(peerChannel, AcceptMsg.MSG_CODE, AcceptMsg.serializer);
+
         
+        registerMessageHandler(peerChannel, AcceptAckMsg.MSG_CODE, this::uponAcceptAckMsg, this::uponMessageFailed);
+        registerMessageHandler(peerChannel, AcceptMsg.MSG_CODE, this::uponAcceptMsg, this::uponMessageFailed);
+
+
+        //注册时钟
+        registerTimerHandler(FlushMsgTimer.TIMER_ID, this::onFlushMsgTimer);
+        registerTimerHandler(TPOChain.timers.ReconnectTimer.TIMER_ID, this::onReconnectTimer);
+
+
+        //接收从front的 写  和  读请求
+        registerRequestHandler(SubmitBatchRequest.REQUEST_ID, this::onSubmitBatch);
+        
+        
+        
+        //注册订阅
+        // TODO: 2023/6/19 订阅nextokFront和nextokBack层  leader 
+        // TODO: 2023/6/19 订阅 是否为前链  能否处理请求 
+        // TODO: 2023/6/19 订阅成员列表 
+        
+        
+        
+        registerChannelEventHandler(peerChannel, OutConnectionDown.EVENT_ID, this::onOutConnectionDown);
+        registerChannelEventHandler(peerChannel, OutConnectionUp.EVENT_ID, this::onOutConnectionUp);
+        registerChannelEventHandler(peerChannel, OutConnectionFailed.EVENT_ID, this::onOutConnectionFailed);
+        
+        logger.info("TPOChaindata开启: ");
     }
 
 
+
+
+
+
+    /**
+     * 消息Failed，发出logger.warn("Failed:)
+     */
+    private void uponMessageFailed(ProtoMessage msg, Host host, short i, Throwable throwable, int i1) {
+        logger.warn("Failed: " + msg + ", to: " + host + ", reason: " + throwable.getMessage());
+    }
     
     
-
-
-    
-
-
-    //Notice front只连接到 writeto即 leader节点，对于其他节点不连接
+    //Notice data层只连接到 writeto即 leader节点，对于其他节点不连接
 
     /**
      * 在TCP连接writesTO节点时，将pendingWrites逐条发送到下一个节点
@@ -168,7 +219,10 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         Host peer = event.getNode();
         if (peer.equals(writesTo)) {
             writesToConnected = true;
-            logger.debug("Connected to writesTo " + event);
+            if (logger.isDebugEnabled()){
+                logger.debug("Connected to writesTo " + event);
+            }
+      
             /*
              * pendingWrites是Queue<Pair<Long, OpBatch>>
              * */
@@ -179,6 +233,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         }
     }
 
+    
     /**
      * 在与下一个节点断开后开始重连
      * */
@@ -191,6 +246,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         }
     }
 
+    
     protected void onOutConnectionFailed(OutConnectionFailed<Void> event, int channel) {
         logger.info(event);
         Host peer = event.getNode();
@@ -202,6 +258,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         }
     }
     
+    
     /**
      * 与 writesTo尝试重新建立连接
      * */
@@ -210,7 +267,6 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
             logger.info("Trying to reconnect to writesTo " + timer.getHost());
             openConnection(timer.getHost());
         }
-        
     }
 
 
@@ -248,7 +304,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
 
         //同时向leader发送排序请求:排序不发noop消息改成直接向全体节点发送ack设置一个时钟,什么时候开启,什么时候关闭
         OrderMSg orderMSg=new OrderMSg(self,instance.iN);
-        sendOrEnqueue(orderMSg,supportedLeader());
+        sendOrEnqueue(orderMSg,leader);
 
 
         // 先发给自己:这里直接使用对应方法
@@ -604,4 +660,23 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         }
     }
 
+
+
+
+
+
+    /**
+     * 发送消息给自己和其他主机
+     */
+    void sendOrEnqueue(ProtoMessage msg, Host destination) {
+        if (logger.isDebugEnabled()){
+            logger.debug("Destination: " + destination);
+        }
+        if (msg == null || destination == null) {
+            logger.error("null: " + msg + " " + destination);
+        } else {
+            if (destination.equals(self)) deliverMessageIn(new MessageInEvent(new BabelMessage(msg, (short)-1, (short)-1), self, peerChannel));
+            else sendMessage(msg, destination);
+        }
+    }
 }

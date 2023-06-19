@@ -2,7 +2,6 @@ package TPOChain.utils;
 
 import TPOChain.ipc.SubmitReadRequest;
 import common.values.PaxosValue;
-import pt.unl.fct.di.novasys.babel.core.Instance;
 import pt.unl.fct.di.novasys.network.data.Host;
 
 import java.util.*;
@@ -10,7 +9,7 @@ import java.util.*;
  * 局部日志条目：instance的实例 
  * commandleader除了发送appbatch分发消息，还有NOOP消息对之前消息的ack信息，
  * */
-public class InstanceState  implements Instance {
+public class InstanceState  {
     //要对SeqN进行改造，Seq的Node节点标记从哪个commandleader发来的
     public SeqN highestAccept;
     public final int iN;
