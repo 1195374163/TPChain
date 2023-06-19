@@ -1,5 +1,6 @@
 package TPOChain;
 
+import TPOChain.ipc.SubmitOrderMsg;
 import TPOChain.ipc.SubmitReadRequest;
 import TPOChain.utils.*;
 import common.values.*;
@@ -464,7 +465,12 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //接收从front的 写  和  读请求
         registerRequestHandler(SubmitBatchRequest.REQUEST_ID, this::onSubmitBatch);
         registerRequestHandler(SubmitReadRequest.REQUEST_ID, this::onSubmitRead);
-
+        
+        
+        
+        // 接收从data层的排序request
+        //接收从front的 写  和  读请求
+        registerRequestHandler(SubmitOrderMsg.REQUEST_ID, this::onSubmitOrderMsg);
         //根据初始设置：新加入节点是激活的还是等待加入的
         if (state == TPOChainProto.State.ACTIVE) {
             if (!seeds.contains(self)) {
@@ -1053,6 +1059,18 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      * 处理OrderMsg信息
      */
     private void uponOrderMSg(OrderMSg msg, Host from, short sourceProto, int channel) {
+        if (amQuorumLeader){//只有leader才能处理这个排序请求
+            if (logger.isDebugEnabled()){
+                logger.debug("我是leader,收到"+from+"的"+msg+"开始sendNextAcceptCL()");
+            }
+            sendNextAcceptCL(new SortValue(msg.node,msg.iN));
+        }else {//对消息进行转发,转发到leader
+            sendOrEnqueue(msg,supportedLeader());
+        }
+    }
+
+    public void onSubmitOrderMsg(SubmitOrderMsg not, short from){
+        OrderMSg msg=not.getOrdermsg();
         if (amQuorumLeader){//只有leader才能处理这个排序请求
             if (logger.isDebugEnabled()){
                 logger.debug("我是leader,收到"+from+"的"+msg+"开始sendNextAcceptCL()");

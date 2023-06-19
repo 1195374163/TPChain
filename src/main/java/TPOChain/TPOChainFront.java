@@ -198,7 +198,9 @@ public class TPOChainFront extends FrontendProto {
      * **/
 
     protected void onPeerBatchMessage(PeerBatchMessage msg, Host from, short sProto, int channel) {
-        sendRequest(new SubmitBatchRequest(msg.getBatch()), TPOChainProto.PROTOCOL_ID);
+        //sendRequest(new SubmitBatchRequest(msg.getBatch()), TPOChainProto.PROTOCOL_ID);
+        // 这里改为了向data层发送请求
+        sendRequest(new SubmitBatchRequest(msg.getBatch()),TPOChainData.PROTOCOL_ID);
     }
 
 

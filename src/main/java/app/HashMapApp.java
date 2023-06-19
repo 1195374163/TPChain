@@ -1,5 +1,6 @@
 package app;
 
+import TPOChain.TPOChainData;
 import TPOChain.TPOChainFront;
 import TPOChain.TPOChainProto;
 import app.networking.RequestDecoder;
@@ -71,11 +72,15 @@ public class HashMapApp implements Application {
         int port = Integer.parseInt(configProps.getProperty("app_port"));
         Babel babel = Babel.getInstance();
         EventLoopGroup consensusWorkerGroup = NetworkManager.createNewWorkerGroup();
+        
         String alg = configProps.getProperty("algorithm");
         int nFrontends = Short.parseShort(configProps.getProperty("n_frontends"));
         frontendProtos = new LinkedList<>();//frontendProtos是List<FrontendProto> frontendProtos;
         GenericProtocol consensusProto;
-
+        GenericProtocol consensusdata = null;
+        EventLoopGroup consensusdataWorkerGroup = NetworkManager.createNewWorkerGroup();
+        
+        
         switch (alg) {
             case "chain_mixed":
                 for (short i = 0; i < nFrontends; i++)
@@ -150,6 +155,7 @@ public class HashMapApp implements Application {
             case "TPOChain":
                 for (short i = 0; i < nFrontends; i++)
                     frontendProtos.add(new TPOChainFront(configProps, i, this));
+                consensusdata  =new TPOChainData(configProps,consensusdataWorkerGroup);
                 consensusProto = new TPOChainProto(configProps, consensusWorkerGroup);
                 break;
             default:
@@ -160,11 +166,14 @@ public class HashMapApp implements Application {
 
         for (FrontendProto frontendProto : frontendProtos)
             babel.registerProtocol(frontendProto);
+        babel.registerProtocol(consensusdata);
         babel.registerProtocol(consensusProto);
 
+        
         for (FrontendProto frontendProto : frontendProtos)
             frontendProto.init(configProps);
         consensusProto.init(configProps);
+        consensusdata.init(configProps);
         //线程开
         babel.start();
 
