@@ -4,6 +4,7 @@ import TPOChain.messages.AcceptAckMsg;
 import TPOChain.messages.AcceptMsg;
 import TPOChain.messages.OrderMSg;
 import TPOChain.messages.UnaffiliatedMsg;
+import TPOChain.notifications.MembershipAndLeaderChange;
 import TPOChain.timers.FlushMsgTimer;
 import TPOChain.utils.*;
 import chainpaxos.timers.ReconnectTimer;
@@ -42,7 +43,8 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     
     public static final String ADDRESS_KEY = "consensus_address";
     public static final String PORT_KEY = "data_port";
-
+    
+    public static final String CONSENSUS_PORT_KEY = "consensus_port";
 
     public static final String RECONNECT_TIME_KEY = "reconnect_time";
     public static final String NOOP_INTERVAL_KEY = "noop_interval";
@@ -57,12 +59,16 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
 
     
     
-
+    // 这里的
     //系统中的成员：端口号和控制层的协议层不一致
     protected Membership membership;
+    //这是对membership中的ip地址的备份
+    protected  List<InetAddress> membershipInetAddress;
     private final int QUORUM_SIZE;
+
+    protected final int PEER_PORT;
     
-    
+    protected  final  int CONSENSUS_PORT;
     //前链连接和后链连接
     private Host  self;  
     
@@ -152,6 +158,8 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         this.RECONNECT_TIME = Integer.parseInt(props.getProperty(RECONNECT_TIME_KEY));
         this.NOOP_SEND_INTERVAL = Integer.parseInt(props.getProperty(NOOP_INTERVAL_KEY));
         this.QUORUM_SIZE = Integer.parseInt(props.getProperty(QUORUM_SIZE_KEY));
+        this.PEER_PORT =  Integer.parseInt(props.getProperty(PORT_KEY));
+        this.CONSENSUS_PORT=Integer.parseInt(props.getProperty(CONSENSUS_PORT_KEY));
     }
 
     
@@ -182,12 +190,11 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         registerRequestHandler(SubmitBatchRequest.REQUEST_ID, this::onSubmitBatch);
         
         
-        
         //注册订阅
         // TODO: 2023/6/19 订阅nextokFront和nextokBack层  leader 
         // TODO: 2023/6/19 订阅 是否为前链  能否处理请求 
-        // TODO: 2023/6/19 订阅成员列表 
-        
+        // TODO: 2023/6/19 订阅成员列表，和leader，有leader一定能开始处理
+        subscribeNotification(MembershipAndLeaderChange.NOTIFICATION_ID, this::onMembershipAndLeaderChange);
         
         
         registerChannelEventHandler(peerChannel, OutConnectionDown.EVENT_ID, this::onOutConnectionDown);
@@ -640,22 +647,30 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     /**
      * logger.info("New writesTo: " + writesTo.getAddress());
      * */
-    protected void onMembershipChange(MembershipChange notification, short emitterId) {
+    protected void onMembershipAndLeaderChange(MembershipAndLeaderChange notification, short emitterId) {
+        List<InetAddress>  notmembership= notification.getOrderedMembers();
+        if (membershipInetAddress==null || !membershipInetAddress.equals(notmembership)){
+            membershipInetAddress=notmembership;
+            // TODO: 2023/6/19 改变nextokfront  nextokback
+            new Host(notification.getWritesTo(), PEER_PORT);
+        }
 
-        //update membership and responder
-        membership = notification.getOrderedMembers();
-
+        
+        InetAddress noteInetAddress=notification.getLeader();
+        if (noteInetAddress==null){// 初始化的时候还没有leader被选举出来
+            return;
+        }
         //Writes to changed
-        if (writesTo == null || !notification.getWritesTo().equals(writesTo.getAddress())) {
+        if (leader == null || !noteInetAddress.equals(leader.getAddress())) {
             //Close old writesTo
-            if (writesTo != null && !writesTo.getAddress().equals(self)) {
-                writesToConnected = false;
-                closeConnection(writesTo, peerChannel);
+            if (leader != null && !leader.getAddress().equals(self)) {
+                leaderConnected = false;
+                closeConnection(leader, peerChannel);
             }
             //Update and open to new writesTo
-            writesTo = new Host(notification.getWritesTo(), PEER_PORT);
-            logger.info("New writesTo: " + writesTo.getAddress());
-            if (!writesTo.getAddress().equals(self))
+            leader = new Host(noteInetAddress, 50300);
+            logger.info("New leaderto: " + noteInetAddress);
+            if (!leader.getAddress().equals(self.getAddress()))
                 openConnection(writesTo, peerChannel);
         }
     }
@@ -675,8 +690,10 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         if (msg == null || destination == null) {
             logger.error("null: " + msg + " " + destination);
         } else {
-            if (destination.equals(self)) deliverMessageIn(new MessageInEvent(new BabelMessage(msg, (short)-1, (short)-1), self, peerChannel));
-            else sendMessage(msg, destination);
+            if (destination.equals(self)) {
+                // TODO: 2023/6/19   这里改成向leader发送一个request，协议间通信
+                deliverMessageIn(new MessageInEvent(new BabelMessage(msg, (short)-1, (short)-1), self, peerChannel));
+            } else sendMessage(msg, destination);
         }
     }
 }

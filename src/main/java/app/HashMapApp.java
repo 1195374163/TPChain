@@ -20,9 +20,6 @@ import epaxos.EPaxosFront;
 import epaxos.EPaxosProto;
 import epaxos.EsolatedPaxosProto;
 import frontend.FrontendProto;
-import improchainpaxos.ImproChainPaxosDelayedFront;
-import improchainpaxos.ImproChainPaxosDelayedProto;
-import improchainpaxos.ImproChainPaxosMixedFront;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoopGroup;
@@ -145,11 +142,11 @@ public class HashMapApp implements Application {
                     frontendProtos.add(new RingPaxosFront(configProps, i, this));
                 consensusProto = new RingPaxosPiggyProto(configProps, consensusWorkerGroup);
                 break;
-            case "improchain_delayed":
-                for (short i = 0; i < nFrontends; i++)
-                    frontendProtos.add(new ImproChainPaxosDelayedFront(configProps, i, this));
-                consensusProto = new ImproChainPaxosDelayedProto(configProps, consensusWorkerGroup);
-                break;
+            //case "improchain_delayed":
+            //    for (short i = 0; i < nFrontends; i++)
+            //        frontendProtos.add(new ImproChainPaxosDelayedFront(configProps, i, this));
+            //    consensusProto = new ImproChainPaxosDelayedProto(configProps, consensusWorkerGroup);
+            //    break;
             case "TPOChain":
                 for (short i = 0; i < nFrontends; i++)
                     frontendProtos.add(new TPOChainFront(configProps, i, this));
