@@ -10,7 +10,7 @@ import java.io.IOException;
 
 public class AcceptAckMsg extends ProtoMessage {
 
-    public static final short MSG_CODE = 201;
+    public static final short MSG_CODE = 501;
     public  final  Host node;
     public final int instanceNumber;
     

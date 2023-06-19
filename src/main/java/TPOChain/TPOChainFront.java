@@ -27,10 +27,15 @@ public class TPOChainFront extends FrontendProto {
 
     public final static short PROTOCOL_ID_BASE = 100;
     public final static String PROTOCOL_NAME_BASE = "TPOChainFronted";
+
+
+    public static final String BATCH_SIZE_KEY = "batch_size"; 
     public static final String BATCH_INTERVAL_KEY = "batch_interval";
-    public static final String LOCAL_BATCH_INTERVAL_KEY = "local_batch_interval";
-    public static final String BATCH_SIZE_KEY = "batch_size";
+    
     public static final String LOCAL_BATCH_SIZE_KEY = "local_batch_size";
+    public static final String LOCAL_BATCH_INTERVAL_KEY = "local_batch_interval";
+ 
+    
     private static final Logger logger = LogManager.getLogger(TPOChainFront.class);
     private final int BATCH_INTERVAL;
     private final int LOCAL_BATCH_INTERVAL;
@@ -301,7 +306,7 @@ public class TPOChainFront extends FrontendProto {
 
 
 
-    /* -------------------- CONSENSUS OPS ----------------------------------------------- */
+    // -------------------- CONSENSUS OPS ----------------------------------------------- 
 
     /**
      * Fronted具体负责执行write的batch

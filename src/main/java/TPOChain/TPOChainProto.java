@@ -33,34 +33,41 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.stream.Collectors;
 
-public class TPOChainProto extends GenericProtocol {
+public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedInstances{
     private static final Logger logger = LogManager.getLogger(TPOChainProto.class);
 
     public final static short PROTOCOL_ID = 200;
     public final static String PROTOCOL_NAME = "TPOChainProto";
 
+    
     public static final String ADDRESS_KEY = "consensus_address";
     public static final String PORT_KEY = "consensus_port";
-    public static final String QUORUM_SIZE_KEY = "quorum_size";
+
+    
     public static final String LEADER_TIMEOUT_KEY = "leader_timeout";
-    public static final String JOIN_TIMEOUT_KEY = "join_timeout";
-    public static final String STATE_TRANSFER_TIMEOUT_KEY = "state_transfer_timeout";
-    public static final String INITIAL_STATE_KEY = "initial_state";
-    public static final String INITIAL_MEMBERSHIP_KEY = "initial_membership";
+  
     public static final String RECONNECT_TIME_KEY = "reconnect_time";
     public static final String NOOP_INTERVAL_KEY = "noop_interval";
+    public static final String JOIN_TIMEOUT_KEY = "join_timeout";
+    public static final String STATE_TRANSFER_TIMEOUT_KEY = "state_transfer_timeout";
+    
+    
+    public static final String INITIAL_STATE_KEY = "initial_state";
+    public static final String INITIAL_MEMBERSHIP_KEY = "initial_membership";
+    public static final String QUORUM_SIZE_KEY = "quorum_size";
 
     
     /**
      * 各项超时设置
      */
     private final int LEADER_TIMEOUT;
-    private final int JOIN_TIMEOUT;
-    private final int STATE_TRANSFER_TIMEOUT;
     private final int NOOP_SEND_INTERVAL;
     private final int QUORUM_SIZE;
     private final int RECONNECT_TIME;
-
+    private final int JOIN_TIMEOUT;
+    private final int STATE_TRANSFER_TIMEOUT;
+    
+    
     //  对各项超时之间的依赖关系：
     //   noOp_sended_timeout  leader_timeout  reconnect_timeout
     //下面是具体取值
@@ -129,6 +136,7 @@ public class TPOChainProto extends GenericProtocol {
     
 
     
+    
     /**
      * 是否为leader,职能排序
      * */
@@ -179,8 +187,6 @@ public class TPOChainProto extends GenericProtocol {
     //标记前链节点能否开始处理客户端的请求
     private boolean canHandleQequest=false;
     
-    //前链节点是否已经发送sendFlushFlag
-    private  boolean  sendFlushMsgFlag=false;
     
     
     
@@ -193,7 +199,7 @@ public class TPOChainProto extends GenericProtocol {
     /**
      * 局部日志
      */
-    private final Map<Host,ConcurrentMap<Integer, InstanceState>> instances = new HashMap<>(INITIAL_MAP_SIZE);
+    private final Map<Host,Map<Integer, InstanceState>> instances = new HashMap<>(INITIAL_MAP_SIZE);
 
     /**
      * 全局日志
@@ -203,7 +209,7 @@ public class TPOChainProto extends GenericProtocol {
     
     // 加一个锁能对下面数据的访问:
     // 对全局日志参数的访问
-    private final Object readLock = new Object();
+    private final Object executeLock = new Object();
     
     /**
      * leader这是主要排序阶段使用
@@ -1492,22 +1498,25 @@ public class TPOChainProto extends GenericProtocol {
         if (logger.isDebugEnabled()){
             logger.debug("Decided: " + instance.iN + " - " + instance.acceptedValue);
         }
-        
-        
-        
         //Actually execute message
         if (instance.acceptedValue.type == PaxosValue.Type.SORT) {
             if (state == TPOChainProto.State.ACTIVE){
-                execute();
+                synchronized (executeLock){
+                    execute();
+                }
             } else  //在节点处于加入join之后，暂存存放的批处理命令
                 // TODO: 2023/6/1 这里不对，在加入节点时，不能执行这个 
                 bufferedOps.add((SortValue) instance.acceptedValue);
         } else if (instance.acceptedValue.type == PaxosValue.Type.MEMBERSHIP) {
             executeMembershipOp(instance);
-            execute();
+            synchronized (executeLock){
+                execute();
+            }
         } else if (instance.acceptedValue.type == PaxosValue.Type.NO_OP) {
             //nothing
-            execute();
+            synchronized (executeLock){
+                execute();
+            }
         }
     }
     
@@ -1641,6 +1650,9 @@ public class TPOChainProto extends GenericProtocol {
     // 全局日志的已经ack到当前decided之间的消息进行扫描，达到命令执行的要求
     // 从execute到ack的开始执行
     
+    
+    private  Host lacknode;
+    private  int   lackid;
     //按照全局日志表执行命令:执行的是用户请求命令
     private void execute(){
         // 是使用调用处循环，还是方法内部使用循环?  外部使用
@@ -1658,11 +1670,14 @@ public class TPOChainProto extends GenericProtocol {
                 }
             }else {// 是排序消息
                 SortValue sortTarget= (SortValue)globalInstanceTemp.acceptedValue;
-                Map<Integer, InstanceState> tagetMap=instances.get(sortTarget.getNode());
+                Host  tempHost=sortTarget.getNode();
+                Map<Integer, InstanceState> tagetMap=instances.get(tempHost);
                 int  iNtarget=sortTarget.getiN();
                 InstanceState ins= tagetMap.get(iNtarget);
                 //如果分发消息不为空就可以执行
                 if (ins == null ||  ins.acceptedValue ==null){
+                    lacknode=tempHost;
+                    lackid=iNtarget;
                 //if (ins == null || !ins.isDecided()){
                     if (ins==null){
                         if (logger.isDebugEnabled()){
@@ -1813,6 +1828,12 @@ public class TPOChainProto extends GenericProtocol {
         if (msg.ack>hostSendConfigure.highestAcknowledgedInstance){
             //对于之前的实例进行ack并进行垃圾收集
             ackInstance(sender,msg.ack);
+        }
+        
+        if (sender.equals(lacknode) && lackid==msg.iN){
+            synchronized (executeLock){
+                execute();
+            }
         }
     }
 
@@ -2491,6 +2512,7 @@ public class TPOChainProto extends GenericProtocol {
     private Host supportedLeader() {
         return currentSN.getValue().getNode();
     }
+    
     
     /**
      * 发送消息给自己和其他主机

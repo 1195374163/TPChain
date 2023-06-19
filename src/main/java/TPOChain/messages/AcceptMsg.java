@@ -11,7 +11,7 @@ import java.io.IOException;
 
 public class AcceptMsg extends ProtoMessage {
 
-    public static final short MSG_CODE = 202;
+    public static final short MSG_CODE = 502;
     
     public final int iN;
     public final SeqN sN;
