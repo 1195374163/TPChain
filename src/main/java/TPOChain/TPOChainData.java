@@ -36,6 +36,7 @@ import java.util.*;
 
 public class TPOChainData extends GenericProtocol  implements ShareDistrubutedInstances {
     
+    // 下面是字段名
     private static final Logger logger = LogManager.getLogger(TPOChainData.class);
 
     public final static short PROTOCOL_ID = 300;
@@ -43,10 +44,9 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
 
     
     public static final String ADDRESS_KEY = "consensus_address";
-    public static final String PORT_KEY = "data_port";
+    public static final String DATA_PORT_KEY = "data_port";
     public static final String CONSENSUS_PORT_KEY = "consensus_port";
 
-    
     
     
     public static final String RECONNECT_TIME_KEY = "reconnect_time";
@@ -55,7 +55,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     public static final String QUORUM_SIZE_KEY = "quorum_size";
     
     
-    
+    // 下面是变量
 
     private final int NOOP_SEND_INTERVAL;
     private final int RECONNECT_TIME;
@@ -67,24 +67,27 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     protected Membership membership;
     //这是对membership中的ip地址的备份
     protected  List<InetAddress> membershipInetAddress;
-    private   final int QUORUM_SIZE;
     protected final int PEER_PORT;
     protected final int CONSENSUS_PORT;
+    private   final int QUORUM_SIZE;
+
+    
+    
     //前链连接和后链连接
     private Host  self;  
     
-    //leader 向leader发送排序请求，这里的端口号是50300而不是自己的50600 
+    //leader 向leader发送排序请求，这里的端口号是50300而不是自己的50200 
     private Host  leader;
     private boolean leaderConnected;
-    
-    
     
     private Host nextOkFront;
     private boolean nextOkFrontConnected;
     private Host nextOkBack;
     private boolean nextOkBackConnected;
 
-    //此协议使用哪种通道的线程来处理
+    
+    
+    //自己节点对分发消息使用通道的哪种序号的线程来处理
     private  short  threadid;
     
     
@@ -100,7 +103,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     
     
     
-
+    // 根据membership推算出自己是否为前链节点
     
     /**
  * 标记是否为前段节点，代表者可以发送command，并向leader发送排序
@@ -112,8 +115,8 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     
     
     
-    //在commandleader发送第一条命令的时候开启闹钟，
-    // 在第一次ack和  accept与send  相等时，关闹钟，刚来时
+    
+    //前链节点使用：在commandleader发送第一条命令的时候开启闹钟，在第一次ack和  accept与send  相等时，关闹钟，刚来时
     private long frontflushMsgTimer = -1;
     
     //主要是前链什么时候发送flushMsg信息
@@ -123,10 +126,12 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
 
 
     
+    
     //是前链但还不能处理请求的暂存队列
     private final Queue<AppOpBatch> waitingAppOps = new LinkedList<>();
 
     
+    // 网络层的通道
     private int peerChannel;
 
     
@@ -143,10 +148,11 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         amFrontedNode=false; //默认不是前链节点
         canHandleQequest=false;//相应的默认不能处理请求
         
-        //端口号为50600
+        //端口号为50200
         self = new Host(InetAddress.getByName(props.getProperty(ADDRESS_KEY)),
-                Integer.parseInt(props.getProperty(PORT_KEY)));
+                Integer.parseInt(props.getProperty(DATA_PORT_KEY)));
         //不管是排序还是分发消息：标记下一个节点
+        
         nextOkFront =null;
         nextOkBack=null;
         leader=null;
@@ -154,21 +160,22 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         nextOkFrontConnected=false;
         nextOkBackConnected=false;
         leaderConnected=false;
-        
-        
+
+
+        this.PEER_PORT =  Integer.parseInt(props.getProperty(DATA_PORT_KEY));
+        this.CONSENSUS_PORT=Integer.parseInt(props.getProperty(CONSENSUS_PORT_KEY));
         
         this.RECONNECT_TIME = Integer.parseInt(props.getProperty(RECONNECT_TIME_KEY));
         this.NOOP_SEND_INTERVAL = Integer.parseInt(props.getProperty(NOOP_INTERVAL_KEY));
+        
         this.QUORUM_SIZE = Integer.parseInt(props.getProperty(QUORUM_SIZE_KEY));
-        this.PEER_PORT =  Integer.parseInt(props.getProperty(PORT_KEY));
-        this.CONSENSUS_PORT=Integer.parseInt(props.getProperty(CONSENSUS_PORT_KEY));
     }
 
     
     public void init(Properties props) throws HandlerRegistrationException, IOException {
         Properties peerProps = new Properties();
         peerProps.put(TCPChannel.ADDRESS_KEY, props.getProperty(ADDRESS_KEY));
-        peerProps.setProperty(TCPChannel.PORT_KEY, props.getProperty(PORT_KEY));
+        peerProps.setProperty(TCPChannel.PORT_KEY, props.getProperty(DATA_PORT_KEY));
         peerProps.put(TCPChannel.WORKER_GROUP_KEY, workerGroup);
         peerChannel = createChannel(TCPChannel.NAME, peerProps);
         setDefaultChannel(peerChannel);
@@ -185,6 +192,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
 
         //注册时钟
         registerTimerHandler(FlushMsgTimer.TIMER_ID, this::onFlushMsgTimer);
+        // FIXME: 2023/6/20 这里的Reconnect和控制层的Reconnect重了，需要单独设置一份重连的时钟
         registerTimerHandler(TPOChain.timers.ReconnectTimer.TIMER_ID, this::onReconnectTimer);
 
 
@@ -193,12 +201,10 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         
         
         //注册订阅
-        // TODO: 2023/6/19 订阅nextokFront和nextokBack层  leader 
-        // TODO: 2023/6/19 订阅 是否为前链  能否处理请求 
-        // TODO: 2023/6/19 订阅成员列表，和leader，有leader一定能开始处理
         subscribeNotification(MembershipAndLeaderChange.NOTIFICATION_ID, this::onMembershipAndLeaderChange);
         
         
+        // 注册通道时间
         registerChannelEventHandler(peerChannel, OutConnectionDown.EVENT_ID, this::onOutConnectionDown);
         registerChannelEventHandler(peerChannel, OutConnectionUp.EVENT_ID, this::onOutConnectionUp);
         registerChannelEventHandler(peerChannel, OutConnectionFailed.EVENT_ID, this::onOutConnectionFailed);
@@ -561,6 +567,8 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
 
     
 
+    
+    /*-----------------------接收来自控制层的成员管理消息------------------------------------------*/
     // TODO: 2023/6/19 以后关于成员更改要重新考虑，现在不做考虑： 
     //  程序一些bug在之后再考虑
     //主要是改变成员列表参数，改变节点所指向的nextokfront和nextokback节点
@@ -656,14 +664,17 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
 
     
     
+    
+    
+    
+    
     /**
      * 消息Failed，发出logger.warn("Failed:)
      */
     private void uponMessageFailed(ProtoMessage msg, Host host, short i, Throwable throwable, int i1) {
         logger.warn("Failed: " + msg + ", to: " + host + ", reason: " + throwable.getMessage());
     }
-
-
+    
     
     //data层连接到 leader节点 nextokback nextokfront节点
     
@@ -764,6 +775,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
 
     
 
+    
 
     /**
      * 发送消息给自己和其他主机

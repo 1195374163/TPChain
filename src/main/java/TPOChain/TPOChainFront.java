@@ -42,13 +42,17 @@ public class TPOChainFront extends FrontendProto {
     private final int BATCH_SIZE;
     private final int LOCAL_BATCH_SIZE;
     
+    
+    
     //Forwarded 对于已经发送下层协议的批处理，备份保存
     private final Queue<Pair<Long, OpBatch>> pendingWrites;
     private final Queue<Pair<Long, List<byte[]>>> pendingReads;
     
+    
     // 读和写的锁
     private final Object readLock = new Object();
     private final Object writeLock = new Object();
+    
     
     //消息的发往地
     private Host writesTo;
@@ -116,6 +120,7 @@ public class TPOChainFront extends FrontendProto {
     @Override
     protected void _init(Properties props) throws HandlerRegistrationException {
         registerTimerHandler(BatchTimer.TIMER_ID, this::handleBatchTimer);
+        
         final int minTimer = Math.min(LOCAL_BATCH_INTERVAL, BATCH_INTERVAL);
         setupPeriodicTimer(new BatchTimer(), minTimer, minTimer);
 

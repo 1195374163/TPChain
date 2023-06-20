@@ -54,7 +54,6 @@ public abstract class FrontendProto extends GenericProtocol {
         opPrefix = ByteBuffer.wrap(self.getAddress()).getInt();
         opCounter = 0;
         membership = null;
-        
         this.protoIndex = protoIndex;
     }
 
@@ -84,6 +83,7 @@ public abstract class FrontendProto extends GenericProtocol {
         subscribeNotification(MembershipChange.NOTIFICATION_ID, this::onMembershipChange);
         subscribeNotification(ExecuteBatchNotification.NOTIFICATION_ID, this::onExecuteBatch);
         subscribeNotification(InstallSnapshotNotification.NOTIFICATION_ID, this::onInstallSnapshot);
+        
         //接收来自proto的请求state的请求
         registerRequestHandler(GetSnapshotRequest.REQUEST_ID, this::onGetStateSnapshot);
        

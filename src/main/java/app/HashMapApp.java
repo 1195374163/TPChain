@@ -72,13 +72,12 @@ public class HashMapApp implements Application {
         int port = Integer.parseInt(configProps.getProperty("app_port"));
         Babel babel = Babel.getInstance();
         EventLoopGroup consensusWorkerGroup = NetworkManager.createNewWorkerGroup();
-        
+        EventLoopGroup consensusdataWorkerGroup = NetworkManager.createNewWorkerGroup();
         String alg = configProps.getProperty("algorithm");
         int nFrontends = Short.parseShort(configProps.getProperty("n_frontends"));
         frontendProtos = new LinkedList<>();//frontendProtos是List<FrontendProto> frontendProtos;
         GenericProtocol consensusProto;
         GenericProtocol consensusdata = null;
-        EventLoopGroup consensusdataWorkerGroup = NetworkManager.createNewWorkerGroup();
         
         
         switch (alg) {
@@ -155,7 +154,7 @@ public class HashMapApp implements Application {
             case "TPOChain":
                 for (short i = 0; i < nFrontends; i++)
                     frontendProtos.add(new TPOChainFront(configProps, i, this));
-                consensusdata  =new TPOChainData(configProps,consensusdataWorkerGroup);
+                consensusdata  =new  TPOChainData(configProps,consensusdataWorkerGroup);
                 consensusProto = new TPOChainProto(configProps, consensusWorkerGroup);
                 break;
             default:
@@ -166,14 +165,19 @@ public class HashMapApp implements Application {
 
         for (FrontendProto frontendProto : frontendProtos)
             babel.registerProtocol(frontendProto);
-        babel.registerProtocol(consensusdata);
+        if (consensusdata!=null){
+            babel.registerProtocol(consensusdata); 
+        }
         babel.registerProtocol(consensusProto);
 
         
         for (FrontendProto frontendProto : frontendProtos)
             frontendProto.init(configProps);
         consensusProto.init(configProps);
-        consensusdata.init(configProps);
+        if (consensusdata!=null){
+            consensusdata.init(configProps);
+        }
+     
         //线程开
         babel.start();
 
@@ -183,12 +187,11 @@ public class HashMapApp implements Application {
                 logger.info("Writes: " + nWrites + ", reads: " + nReads);
             }
         }));
-        //logger.info("main middle");
+        //开启app的监听服务
         EventLoopGroup bossGroup = new NioEventLoopGroup();
         EventLoopGroup workerGroup = new NioEventLoopGroup();
         try {
             ServerBootstrap b = new ServerBootstrap();
-            //logger.info("进入netty");
             b.group(bossGroup, workerGroup)
                     .channel(NioServerSocketChannel.class)
                     .childHandler(new ChannelInitializer<SocketChannel>() {
@@ -199,9 +202,9 @@ public class HashMapApp implements Application {
                         }
                     }).option(ChannelOption.SO_BACKLOG, 128)
                     .childOption(ChannelOption.SO_KEEPALIVE, true);;//给workerGroup的EventLoop对应的管道设置处理器
-            //logger.info("绑定端口号，启动服务端");
             ChannelFuture f = b.bind(port).sync();//绑定端口号，启动服务端
-            logger.debug("Listening: " + f.channel().localAddress());
+            if(logger.isDebugEnabled())
+                logger.debug("Listening: " + f.channel().localAddress());
             f.channel().closeFuture().sync(); //对关闭通道进行监听
             logger.info("Server channel closed");
         } finally {
@@ -209,8 +212,6 @@ public class HashMapApp implements Application {
             bossGroup.shutdownGracefully();
             logger.info("main over");
         }
-
-
     }
 
     public static void main(String[] args) throws InvalidParameterException, IOException,
@@ -389,7 +390,6 @@ public class HashMapApp implements Application {
         @Override
         public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
             RequestMessage rMsg = (RequestMessage) msg;
-            //logger.info("Client op: " + msg);
             if(logger.isDebugEnabled())
                 logger.debug("Client op: " + msg);
             if (rMsg.getRequestType() == RequestMessage.WEAK_READ) { //Exec immediately and respond
@@ -397,8 +397,8 @@ public class HashMapApp implements Application {
                 ctx.channel().writeAndFlush(new ResponseMessage(rMsg.getcId(), bytes == null ? new byte[0] : bytes));
             } else { //Submit to consensus     //当rMsg.getRequestType()== WRITE   or  STRONG_READ
                 int id = idCounter.incrementAndGet();
-                //存档
-                opMapper.put(id, Pair.of(rMsg.getcId(), ctx.channel()));//ConcurrentMap<Integer, Pair<Integer, Channel>> opMapper;
+                //存档 
+                opMapper.put(id, Pair.of(rMsg.getcId(), ctx.channel()));
                 //发送Frontend处理
                 byte[] opData = HashMapOp.toByteArray(id, rMsg.getRequestType(), rMsg.getRequestKey(), rMsg.getRequestValue());
                 //List<FrontendProto> frontendProtos是List集合

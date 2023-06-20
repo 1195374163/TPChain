@@ -6,7 +6,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 
-
+// TPOChainProto和TPOChainData层共享的数据结构
 public interface ShareDistrubutedInstances {
     
     //局部日志
