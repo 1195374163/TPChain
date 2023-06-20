@@ -191,17 +191,21 @@ public class TPOChainFront extends FrontendProto {
      * */
     private void sendBatchToWritesTo(PeerBatchMessage msg) {
         //logger.info("发送"+msg+"到"+writesTo);
-        if (writesTo.getAddress().equals(self)) onPeerBatchMessage(msg, writesTo, getProtoId(), peerChannel);
-        else if (writesToConnected) sendMessage(peerChannel, msg, writesTo);
+        if (writesTo.getAddress().equals(self)) {
+            onPeerBatchMessage(msg, writesTo, getProtoId(), peerChannel);
+        }
+        else if (writesToConnected){
+            sendMessage(peerChannel, msg, writesTo);
+        }
     }
 
+    
     
     
     /**
      * 连接下层的通道 将消息转发给下层的协议层
      * 只传递写的batch信息到protocol层 发送 TPOChainProto的submitBatchRequest
      * **/
-
     protected void onPeerBatchMessage(PeerBatchMessage msg, Host from, short sProto, int channel) {
         //sendRequest(new SubmitBatchRequest(msg.getBatch()), TPOChainProto.PROTOCOL_ID);
         // 这里改为了向data层发送请求

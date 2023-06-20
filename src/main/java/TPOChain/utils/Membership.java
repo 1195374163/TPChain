@@ -400,7 +400,7 @@ public class Membership {
     }
 
     
-    // 将后链节点附加在对应的前链节点
+    // 将后链节点附加在对应的前链节点，是将后链收到的消息发给前链节点来处理
     public Host  appendFrontChainNode(Host self,Host leader){
         if (frontChainContain(self)){// 如果当前节点是前链的话，不需要附加
             return null;

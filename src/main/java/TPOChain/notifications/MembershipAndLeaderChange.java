@@ -1,6 +1,7 @@
 package TPOChain.notifications;
 
 import pt.unl.fct.di.novasys.babel.generic.ProtoNotification;
+import pt.unl.fct.di.novasys.network.data.Host;
 
 import java.net.InetAddress;
 import java.util.List;
@@ -11,18 +12,18 @@ public class MembershipAndLeaderChange extends ProtoNotification {
     
     private final List<InetAddress> orderedMembers;
     
-    private final InetAddress leader;
+    private final Host leader;
     
-    public MembershipAndLeaderChange(List<InetAddress> orderedMembers, InetAddress readsTo,
-                            InetAddress writesTo, InetAddress writeResponder) {
+    public MembershipAndLeaderChange(List<InetAddress> orderedMembers, 
+                            Host leader) {
         super(NOTIFICATION_ID);
         this.orderedMembers = orderedMembers;
-        this.leader = writesTo;
+        this.leader = leader;
     }
 
 
 
-    public InetAddress getLeader() {
+    public Host getLeader() {
         return leader;
     }
 

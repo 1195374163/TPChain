@@ -2,6 +2,7 @@ package TPOChain;
 
 import TPOChain.ipc.SubmitOrderMsg;
 import TPOChain.ipc.SubmitReadRequest;
+import TPOChain.notifications.MembershipAndLeaderChange;
 import TPOChain.utils.*;
 import common.values.*;
 import io.netty.handler.codec.redis.FixedRedisMessagePool;
@@ -389,10 +390,10 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         setDefaultChannel(peerChannel);
 
         
-        registerMessageSerializer(peerChannel, AcceptAckMsg.MSG_CODE, AcceptAckMsg.serializer);
+        //registerMessageSerializer(peerChannel, AcceptAckMsg.MSG_CODE, AcceptAckMsg.serializer);
         //新加
         registerMessageSerializer(peerChannel, AcceptAckCLMsg.MSG_CODE, AcceptAckCLMsg.serializer);
-        registerMessageSerializer(peerChannel, AcceptMsg.MSG_CODE, AcceptMsg.serializer);
+        //registerMessageSerializer(peerChannel, AcceptMsg.MSG_CODE, AcceptMsg.serializer);
         //新加
         registerMessageSerializer(peerChannel, AcceptCLMsg.MSG_CODE, AcceptCLMsg.serializer);
         registerMessageSerializer(peerChannel, DecidedMsg.MSG_CODE, DecidedMsg.serializer);
@@ -412,10 +413,10 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         
         
         registerMessageHandler(peerChannel, UnaffiliatedMsg.MSG_CODE, this::uponUnaffiliatedMsg, this::uponMessageFailed);
-        registerMessageHandler(peerChannel, AcceptAckMsg.MSG_CODE, this::uponAcceptAckMsg, this::uponMessageFailed);
+        //registerMessageHandler(peerChannel, AcceptAckMsg.MSG_CODE, this::uponAcceptAckMsg, this::uponMessageFailed);
         //新加
         registerMessageHandler(peerChannel, AcceptAckCLMsg.MSG_CODE, this::uponAcceptAckCLMsg, this::uponMessageFailed);
-        registerMessageHandler(peerChannel, AcceptMsg.MSG_CODE, this::uponAcceptMsg, this::uponMessageFailed);
+        //registerMessageHandler(peerChannel, AcceptMsg.MSG_CODE, this::uponAcceptMsg, this::uponMessageFailed);
         //新加
         registerMessageHandler(peerChannel, AcceptCLMsg.MSG_CODE, this::uponAcceptCLMsg, this::uponMessageFailed);
         //registerMessageHandler(peerChannel, DecidedMsg.MSG_CODE, this::uponDecidedMsg, this::uponMessageFailed);
@@ -453,7 +454,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         registerTimerHandler(NoOpTimer.TIMER_ID, this::onNoOpTimer);
         registerTimerHandler(ReconnectTimer.TIMER_ID, this::onReconnectTimer);
         //新加   FlushMsgTimer
-        registerTimerHandler(FlushMsgTimer.TIMER_ID, this::onFlushMsgTimer);
+        //registerTimerHandler(FlushMsgTimer.TIMER_ID, this::onFlushMsgTimer);
         // 新加  ForgetStateTimer  删除节点存储的state
         registerTimerHandler(ForgetStateTimer.TIMER_ID, this:: onForgetStateTimer);
         
@@ -463,13 +464,11 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         registerReplyHandler(DeliverSnapshotReply.REPLY_ID, this::onDeliverSnapshot);
 
         //接收从front的 写  和  读请求
-        registerRequestHandler(SubmitBatchRequest.REQUEST_ID, this::onSubmitBatch);
+        //registerRequestHandler(SubmitBatchRequest.REQUEST_ID, this::onSubmitBatch);
         registerRequestHandler(SubmitReadRequest.REQUEST_ID, this::onSubmitRead);
         
         
-        
         // 接收从data层的排序request
-        //接收从front的 写  和  读请求
         registerRequestHandler(SubmitOrderMsg.REQUEST_ID, this::onSubmitOrderMsg);
         //根据初始设置：新加入节点是激活的还是等待加入的
         if (state == TPOChainProto.State.ACTIVE) {
@@ -768,11 +767,12 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         // TODO: 2023/5/18 改变节点的挂载，将后链节点挂载在前链除了leader节点上
         //    下面是改变前面协议对leader的指向
         triggerMembershipChangeNotification();
+        triggerMembershipAndLeaderChange();
     }
 
     
     /**
-     * 发送成员改变通知
+     * 向leader发送成员改变通知
      * */
     private void triggerMembershipChangeNotification() {
         //调用这里说明supportleader肯定不为null
@@ -789,6 +789,25 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             logger.warn("当前节点是前链"+self.toString());
         }
     }
+
+    /**
+     * 向data层发送成员和leader改变通知
+     * */
+    private void triggerMembershipAndLeaderChange() {
+        
+        if (canHandleQequest){
+            triggerNotification(new MembershipAndLeaderChange(
+                    membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
+                    supportedLeader()));
+        }else {
+            triggerNotification(new MembershipAndLeaderChange(
+                    membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
+                    null)); 
+        }
+  
+        
+    }
+    
     
     
     //此节点落后于其他节点，对排序信息进行处理
@@ -1623,11 +1642,13 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             logger.info("Removed from membership: " + target + " in inst " + instance.iN);
             membership.removeMember(target);
             triggerMembershipChangeNotification();
+            triggerMembershipAndLeaderChange();
             closeConnection(target);
         } else if (o.opType == MembershipOp.OpType.ADD) {
             logger.info("Added to membership: " + target + " in inst " + instance.iN);
             membership.addMember(target);
             triggerMembershipChangeNotification();
+            triggerMembershipAndLeaderChange();
             //对next  重新赋值
             nextOkFront=membership.nextLivingInFrontedChain(self);
             nextOkBack=membership.nextLivingInBackChain(self);
