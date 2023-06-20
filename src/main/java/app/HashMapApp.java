@@ -78,7 +78,10 @@ public class HashMapApp implements Application {
         frontendProtos = new LinkedList<>();//frontendProtos是List<FrontendProto> frontendProtos;
         GenericProtocol consensusProto;
         GenericProtocol consensusdata = null;
-        
+
+
+        int availableProcessors = Runtime.getRuntime().availableProcessors();
+        logger.info("Available Processors: " + availableProcessors);
         
         switch (alg) {
             case "chain_mixed":

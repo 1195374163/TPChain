@@ -5,7 +5,6 @@ import TPOChain.ipc.SubmitReadRequest;
 import TPOChain.notifications.MembershipAndLeaderChange;
 import TPOChain.utils.*;
 import common.values.*;
-import io.netty.handler.codec.redis.FixedRedisMessagePool;
 import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
 import TPOChain.ipc.ExecuteReadReply;
 import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
@@ -524,6 +523,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             }
             frontChainNodeAction();
         }
+        triggerMembershipAndLeaderChange();
     }
     
     
@@ -795,16 +795,11 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      * */
     private void triggerMembershipAndLeaderChange() {
         
-        if (canHandleQequest){
+      
             triggerNotification(new MembershipAndLeaderChange(
                     membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
                     supportedLeader()));
-        }else {
-            triggerNotification(new MembershipAndLeaderChange(
-                    membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
-                    null)); 
-        }
-  
+   
         
     }
     

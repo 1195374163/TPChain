@@ -141,7 +141,7 @@ public class TPOChainFront extends FrontendProto {
      * 关于从HashMap App接收来的信息发往下一层protocol
      * */
 
-    /* -------------------- CLIENT OPS ----------------------------------------------- */
+    // -------------------- CLIENT OPS ------------------------------------
 
     /**
      * 接收从客户端接收来的信息，先缓存成批，最后成批处理
@@ -226,8 +226,8 @@ public class TPOChainFront extends FrontendProto {
     }
     
 
-                        /* ---  TIMERS  ---- */
-
+    //----------  TIMERS  ----
+    
     /**
      * 在batch时间间隔内开启处理sendNewReadBatch()或sendNewWriteBatch()
      * */

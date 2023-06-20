@@ -5,7 +5,9 @@ import TPOChain.messages.AcceptAckMsg;
 import TPOChain.messages.AcceptMsg;
 import TPOChain.messages.OrderMSg;
 import TPOChain.messages.UnaffiliatedMsg;
+import TPOChain.notifications.LeaderNotification;
 import TPOChain.notifications.MembershipAndLeaderChange;
+import TPOChain.notifications.ThreadidamFrontNextFrontNextBackNotification;
 import TPOChain.timers.FlushMsgTimer;
 import TPOChain.timers.ReconnectDataTimer;
 import TPOChain.utils.*;
@@ -37,7 +39,7 @@ import java.util.*;
 
 public class TPOChainData extends GenericProtocol  implements ShareDistrubutedInstances {
 
-    // 下面是字段名
+    //下面是字段名的String
     private static final Logger logger = LogManager.getLogger(TPOChainData.class);
 
     public final static short PROTOCOL_ID = 300;
@@ -46,7 +48,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
 
     public static final String ADDRESS_KEY = "consensus_address";
     public static final String DATA_PORT_KEY = "data_port";
-    public static final String CONSENSUS_PORT_KEY = "consensus_port";
+    //public static final String CONSENSUS_PORT_KEY = "consensus_port";
 
 
     public static final String RECONNECT_TIME_KEY = "reconnect_time";
@@ -56,7 +58,6 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
 
 
     // 下面是变量
-
     private final int NOOP_SEND_INTERVAL;
     private final int RECONNECT_TIME;
 
@@ -67,7 +68,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     //这是对membership中的ip地址的备份
     protected List<InetAddress> membershipInetAddress;
     protected final int PEER_PORT;
-    protected final int CONSENSUS_PORT;
+    //protected final int CONSENSUS_PORT;
     private final int QUORUM_SIZE;
 
 
@@ -154,7 +155,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
 
 
         this.PEER_PORT = Integer.parseInt(props.getProperty(DATA_PORT_KEY));
-        this.CONSENSUS_PORT = Integer.parseInt(props.getProperty(CONSENSUS_PORT_KEY));
+        //this.CONSENSUS_PORT = Integer.parseInt(props.getProperty(CONSENSUS_PORT_KEY));
 
         this.RECONNECT_TIME = Integer.parseInt(props.getProperty(RECONNECT_TIME_KEY));
         this.NOOP_SEND_INTERVAL = Integer.parseInt(props.getProperty(NOOP_INTERVAL_KEY));
@@ -191,8 +192,10 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
 
 
         //注册订阅
-        subscribeNotification(MembershipAndLeaderChange.NOTIFICATION_ID, this::onMembershipAndLeaderChange);
-
+        subscribeNotification(LeaderNotification.NOTIFICATION_ID, this::onLeaderChange);
+        subscribeNotification(ThreadidamFrontNextFrontNextBackNotification.NOTIFICATION_ID, this::onThreadidamFrontNextFrontNextBackChange);
+        
+        
 
         // 注册通道时间
         registerChannelEventHandler(peerChannel, OutConnectionDown.EVENT_ID, this::onOutConnectionDown);
@@ -202,6 +205,8 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         logger.info("TPOChaindata开启: ");
     }
 
+    
+    
 
     /**-----------------------------处理节点的分发信息-------------------------------**/
 
@@ -513,6 +518,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     }
 
 
+    
     /**---------------------------接收来自front层的分发消息 ---------**/
 
     /**
@@ -547,100 +553,181 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     // TODO: 2023/6/20 将发送命令改为发送 对应的data层还是直接发到控制层
 
 
+    
+    
+    
     /**------------------------------接收来自控制层的成员管理消息 ---------**/
 
-    // TODO: 2023/6/19 以后关于成员更改要重新考虑，现在不做考虑： 
-    //  程序一些bug在之后再考虑
+    // TODO: 2023/6/19 以后关于成员更改要重新考虑，现在不做考虑：程序一些bug在之后再考虑
     //主要是改变成员列表参数，改变节点所指向的nextokfront和nextokback节点
 
     /**
      * logger.info("New writesTo: " + writesTo.getAddress());
      */
-    protected void onMembershipAndLeaderChange(MembershipAndLeaderChange notification, short emitterId) {
-        List<InetAddress> notmembership = notification.getOrderedMembers();
-        if (membershipInetAddress == null || !membershipInetAddress.equals(notmembership)) {
-            membershipInetAddress = notmembership;
-            List<Host> mem = new ArrayList<>();
-            for (int i = 0; i < membershipInetAddress.size(); i++) {
-                mem.add(new Host(membershipInetAddress.get(i), PEER_PORT));
+    //protected void onMembershipAndLeaderChange(MembershipAndLeaderChange notification, short emitterId) {
+    //    logger.info("收到来自protocol的成员和leader订阅通知");
+    //    List<InetAddress> notmembership = notification.getOrderedMembers();
+    //    if (membershipInetAddress == null || !membershipInetAddress.equals(notmembership)) {
+    //        membershipInetAddress = notmembership;
+    //        List<Host> mem = new ArrayList<>();
+    //        for (int i = 0; i < membershipInetAddress.size(); i++) {
+    //            mem.add(new Host(membershipInetAddress.get(i), PEER_PORT));
+    //        }
+    //        //生成了对应的Host列表
+    //        membership = new Membership(mem, QUORUM_SIZE);
+    //        
+    //        if (membership.frontChainContain(self)) {
+    //            amFrontedNode = true;
+    //        } else {
+    //            amFrontedNode = false;
+    //            //若与leader还是连接的断开连接
+    //            //if (leaderConnected) {
+    //            //    closeConnection(leader, peerChannel);
+    //            //}
+    //        }
+    //        
+    //        
+    //        // 这是自己发送
+    //        threadid=(short)membership.frontIndexOf(self);
+    //        
+    //        
+    //        Host newnextOkFront = membership.nextLivingInFrontedChain(self);
+    //        if (newnextOkFront != null) {
+    //            if (nextOkFront == null || nextOkFront != newnextOkFront) {
+    //                if (nextOkFront != null) {
+    //                    //关闭旧连接
+    //                    closeConnection(nextOkFront, peerChannel);
+    //                }
+    //                nextOkFront=newnextOkFront;
+    //                //开启新的连接
+    //                openConnection(nextOkFront, peerChannel);
+    //            }
+    //        } else {
+    //            // TODO 若newnextOkFront现在为null，原来不为null
+    //        }
+    //
+    //
+    //        // TODO: 2023/6/19 特殊情况当newnextOkBack==null是后链链尾时，也要开辟向leader的连接发送ack
+    //        Host newnextOkBack = membership.nextLivingInBackChain(self);
+    //        if (newnextOkBack != null) {
+    //            if (nextOkBack == null || nextOkBack != newnextOkBack) {
+    //                if (nextOkBack != null) {
+    //                    nextOkBackConnected = false;
+    //                    closeConnection(nextOkBack, peerChannel);
+    //                }
+    //                nextOkBack=newnextOkBack;
+    //                //开启新的连接
+    //                openConnection(nextOkBack, peerChannel);
+    //            }
+    //        } else {// 等于null，说明是后链链尾要连接新leader:同时是前链的话
+    //
+    //        }
+    //
+    //    }
+    //
+    //
+    //    Host noteLeaderHost = notification.getLeader();
+    //    if (noteLeaderHost == null) {// 初始化的时候还没有leader被选举出来
+    //        return;
+    //    }
+    //
+    //
+    //    // 后链链尾节点连接leader发送ack消息
+    //    if (nextOkBack == null && nextOkFront == null) {
+    //        openConnection(leader, peerChannel);
+    //    }
+    //    
+    //    
+    //    // TODO: 2023/6/19 只有前链节点才需要连接leader,后链节点不需要连接leader
+    //    if (amFrontedNode) {
+    //        //Writes to changed
+    //        if (leader == null) {//在初始阶段
+    //            // 现在  noteLeaderHost以及不为null
+    //            //Close old writesTo
+    //
+    //            if ()
+    //            //Update and open to new writesTo
+    //            logger.info("New leader: " + leader);
+    //            if (!leader.getAddress().equals(self.getAddress()))
+    //                openConnection(leader, peerChannel);
+    //        }else {
+    //            if (!leader.equals(self)) {
+    //                leaderConnected = false;
+    //                closeConnection(leader, peerChannel);
+    //            }
+    //        }
+    //    } else {//后链的话nothing
+    //        //不开启与leader的连接
+    //    }
+    //
+    //}
+    
+    
+    // 在leader改变时
+    protected void  onLeaderChange(LeaderNotification notification, short emitterId){
+        
+        Host notleader=notification.getLeader();
+        
+        //Writes to changed
+        if (leader == null || !notleader.equals(leader)) {
+            //Close old writesTo
+            if (leader != null && !leader.getAddress().equals(self.getAddress())) {
+                leaderConnected = false;
+                closeConnection(leader, peerChannel);
             }
-            //生成了对应的Host列表
-            membership = new Membership(mem, QUORUM_SIZE);
-
-            if (membership.frontChainContain(self)) {
-                amFrontedNode = true;
-            } else {
-                amFrontedNode = false;
-                //若与leader还是连接的断开连接
-                if (leaderConnected) {
-                    closeConnection(leader, peerChannel);
-                }
-            }
-
-            Host newnextOkFront = membership.nextLivingInFrontedChain(self);
-            if (newnextOkFront != null) {
-                if (nextOkFront == null || nextOkFront != newnextOkFront) {
-                    if (nextOkFront != null) {
-                        //关闭旧连接
-                        closeConnection(nextOkFront, peerChannel);
-                    }
-                    //开启新的连接
-                    openConnection(nextOkFront, peerChannel);
-                }
-            } else {
-                // TODO 若newnextOkFront现在为null，原来不为null
-            }
-
-
-            // TODO: 2023/6/19 特殊情况当newnextOkBack==null是后链链尾时，也要开辟向leader的连接发送ack
-            Host newnextOkBack = membership.nextLivingInBackChain(self);
-            if (newnextOkBack != null) {
-                if (nextOkBack == null || nextOkBack != newnextOkBack) {
-                    if (nextOkBack != null) {
-                        nextOkBackConnected = false;
-                        closeConnection(nextOkBack, peerChannel);
-                    }
-                    //开启新的连接
-                    openConnection(nextOkBack, peerChannel);
-                }
-            } else {// 等于null，说明是后链链尾要连接新leader:同时是前链的话
-
-            }
-
-        }
-
-
-        Host noteLeaderHost = notification.getLeader();
-        if (noteLeaderHost == null) {// 初始化的时候还没有leader被选举出来
-            return;
-        }
-
-        // 
-        // TODO: 2023/6/19 只有前链节点才需要连接leader,后链节点不需要连接leader
-        if (amFrontedNode) {
-            //Writes to changed
-            if (leader == null || !noteLeaderHost.equals(leader)) {
-                //如果leader
-                //Close old writesTo
-                if (leader != null && !leader.equals(self)) {
-                    leaderConnected = false;
-                    closeConnection(leader, peerChannel);
-                }
-                //Update and open to new writesTo
-                logger.info("New leader: " + leader);
-                if (!leader.getAddress().equals(self.getAddress()))
-                    openConnection(leader, peerChannel);
-            }
-        } else {// 后链的话 nothing
-            //不开启与leader的连接
-        }
-
-        // 后链链尾节点连接leader发送ack消息
-        if (nextOkBack == null && nextOkFront == null) {
-            openConnection(leader, peerChannel);
+            //Update and open to new writesTo
+            leader =notleader;
+            logger.info("New writesTo: " + notleader.getAddress());
+            if (!leader.getAddress().equals(self.getAddress()))
+                openConnection(leader, peerChannel);
         }
     }
-
+    
+    // 在包含 线程号  是否为前链标志   nextokFront   nextOkBack
+    protected  void  onThreadidamFrontNextFrontNextBackChange(ThreadidamFrontNextFrontNextBackNotification notification, short emitterId){
+        this.threadid=notification.getThreadid();
+        
+        this.amFrontedNode=notification.isAmFront();
+        
+        Host  notNextFront=notification.getNextOkFront();
+        if (nextOkFront == null || !notNextFront.equals(nextOkFront)) {
+            //Close old writesTo
+            if (nextOkFront != null && !nextOkFront.getAddress().equals(self.getAddress())) {
+                nextOkFrontConnected = false;
+                closeConnection(nextOkFront, peerChannel);
+            }
+            //Update and open to new writesTo
+            nextOkFront =notNextFront;
+            logger.info("New nextOkFront: " + nextOkFront.getAddress());
+            openConnection(nextOkFront, peerChannel);
+        }
+        
+        Host  notNextBack=notification.getNextOkBack();
+        if (nextOkBack == null || !notNextFront.equals(nextOkBack)) {
+            //Close old writesTo
+            if (nextOkBack != null && !notNextBack.getAddress().equals(self.getAddress())) {
+                nextOkFrontConnected = false;
+                closeConnection(nextOkBack, peerChannel);
+            }
+            //Update and open to new writesTo
+            nextOkBack =notNextFront;
+            logger.info("New nextOkFront: " + nextOkBack.getAddress());
+            openConnection(nextOkBack, peerChannel);
+        }
+    }
+    
+    
+    
+    protected  void  oncanHandleQequestChange(){
+        this
+    }
+    
+    
+    
+    
+    
+    
+    
 
     /**
      * 消息Failed，发出logger.warn("Failed:)
@@ -665,13 +752,14 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
             if (logger.isDebugEnabled()) {
                 logger.debug("Connected to leader " + event);
             }
-
+            return;
         }
         if (peer.equals(nextOkFront)) {
             nextOkFrontConnected = true;
             if (logger.isDebugEnabled()) {
                 logger.debug("Connected to nextOkFront " + event);
             }
+            return;
         }
         if (peer.equals(nextOkBack)) {
             nextOkBackConnected = true;
@@ -750,25 +838,26 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
 
     
     /**
-     * 发送消息给自己和其他主机
+     * 发送消息给自己和其他主机 也就是accept和ack信息
      */
     void sendOrEnqueue(ProtoMessage msg, Host destination) {
-        if (logger.isDebugEnabled()) {
-            logger.debug("分发的目的地: " + destination);
-        }
         if (msg == null || destination == null) {
             logger.error("null: " + msg + " " + destination);
             return;
         }
-        if (destination.equals(leader)) {// 是排序消息
+        // 满足下方条件只会是排序消息
+        if (destination.equals(leader)) {
+            if (msg instanceof OrderMSg){
+                logger.info("是OrderMsg消息类型,发送的protocol层");
+            }
             sendRequest(new SubmitOrderMsg((OrderMSg) msg), TPOChainProto.PROTOCOL_ID);
+            return;
         }
+        // 对于accept和ack信息,一般来说就是前链节点在接收自己处理的accept信息
         if (destination.equals(self)) {
             deliverMessageIn(new MessageInEvent(new BabelMessage(msg, (short) -1, (short) -1), self, peerChannel));
         } else {
             sendMessage(msg, destination);
         }
     }
-
-
 }    
