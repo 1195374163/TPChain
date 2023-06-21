@@ -2,7 +2,6 @@ package TPOChain;
 
 import TPOChain.ipc.SubmitOrderMsg;
 import TPOChain.ipc.SubmitReadRequest;
-import TPOChain.notifications.MembershipAndLeaderChange;
 import TPOChain.utils.*;
 import common.values.*;
 import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
@@ -43,7 +42,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     
     public static final String ADDRESS_KEY = "consensus_address";
     public static final String PORT_KEY = "consensus_port";
-
+    
+    public  static final String DATA_PORT_KEY = "data_port";
     
     public static final String LEADER_TIMEOUT_KEY = "leader_timeout";
   
@@ -67,6 +67,9 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     private final int RECONNECT_TIME;
     private final int JOIN_TIMEOUT;
     private final int STATE_TRANSFER_TIMEOUT;
+    
+    
+    private final  int data_port;
     
     
     //  对各项超时之间的依赖关系：
@@ -347,7 +350,9 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //不管是排序还是分发消息：标记下一个节点
         nextOkFront =null;
         nextOkBack=null;
-        
+
+        //数据层的通信端口号
+        data_port=Integer.parseInt(props.getProperty(DATA_PORT_KEY));
         
         this.QUORUM_SIZE = Integer.parseInt(props.getProperty(QUORUM_SIZE_KEY));
         this.RECONNECT_TIME = Integer.parseInt(props.getProperty(RECONNECT_TIME_KEY));
@@ -523,7 +528,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             }
             frontChainNodeAction();
         }
-        triggerMembershipAndLeaderChange();
+        
     }
     
     
@@ -767,12 +772,16 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         // TODO: 2023/5/18 改变节点的挂载，将后链节点挂载在前链除了leader节点上
         //    下面是改变前面协议对leader的指向
         triggerMembershipChangeNotification();
-        triggerMembershipAndLeaderChange();
     }
 
+
+    // TODO: 2023/6/21 控制层不需要连接nextokfront和nextokBack节点 
+    
+    
+    
     
     /**
-     * 向leader发送成员改变通知
+     * 向front层发送成员改变通知
      * */
     private void triggerMembershipChangeNotification() {
         //调用这里说明supportleader肯定不为null
@@ -790,18 +799,30 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         }
     }
 
+    
+    
+    /**
+     * 向data层前后链改变通知
+     * */
+    // 触发leader 和  can
+    private  void   triggerThreadidamFrontNextFrontNextBackChange(){
+        //triggerNotification(new MembershipAndLeaderChange(
+        //        membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
+        //        supportedLeader()));
+    }
+
+    
     /**
      * 向data层发送成员和leader改变通知
      * */
-    private void triggerMembershipAndLeaderChange() {
-        
-      
-            triggerNotification(new MembershipAndLeaderChange(
-                    membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
-                    supportedLeader()));
-   
-        
+    private  void  triggerLeaderChange(){
+        //triggerNotification(new MembershipAndLeaderChange(
+        //        membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
+        //        supportedLeader()));
     }
+    
+    
+    
     
     
     
@@ -1637,13 +1658,11 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             logger.info("Removed from membership: " + target + " in inst " + instance.iN);
             membership.removeMember(target);
             triggerMembershipChangeNotification();
-            triggerMembershipAndLeaderChange();
             closeConnection(target);
         } else if (o.opType == MembershipOp.OpType.ADD) {
             logger.info("Added to membership: " + target + " in inst " + instance.iN);
             membership.addMember(target);
             triggerMembershipChangeNotification();
-            triggerMembershipAndLeaderChange();
             //对next  重新赋值
             nextOkFront=membership.nextLivingInFrontedChain(self);
             nextOkBack=membership.nextLivingInBackChain(self);
@@ -1751,6 +1770,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //删除局部日志对应的日志项
         targetMap.remove(targetid);
     }
+    
     
     
 

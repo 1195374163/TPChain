@@ -6,23 +6,16 @@ import TPOChain.messages.AcceptMsg;
 import TPOChain.messages.OrderMSg;
 import TPOChain.messages.UnaffiliatedMsg;
 import TPOChain.notifications.LeaderNotification;
-import TPOChain.notifications.MembershipAndLeaderChange;
 import TPOChain.notifications.ThreadidamFrontNextFrontNextBackNotification;
 import TPOChain.timers.FlushMsgTimer;
 import TPOChain.timers.ReconnectDataTimer;
 import TPOChain.utils.*;
-import chainpaxos.ipc.SubmitReadRequest;
-import chainpaxos.timers.ReconnectTimer;
 import common.values.AppOpBatch;
 import common.values.PaxosValue;
 import frontend.ipc.SubmitBatchRequest;
-import frontend.network.PeerBatchMessage;
-import frontend.notifications.MembershipChange;
 import io.netty.channel.EventLoopGroup;
-import org.apache.commons.lang3.tuple.Pair;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-import pt.unl.fct.di.novasys.babel.core.Babel;
 import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
 import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
 import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
@@ -175,19 +168,24 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
 
         registerMessageSerializer(peerChannel, AcceptAckMsg.MSG_CODE, AcceptAckMsg.serializer);
         registerMessageSerializer(peerChannel, AcceptMsg.MSG_CODE, AcceptMsg.serializer);
+        // 需要加这个，因为数据层要往控制层发送这个排序请求
+        registerMessageSerializer(peerChannel, OrderMSg.MSG_CODE, OrderMSg.serializer);
 
-
+        
         registerMessageHandler(peerChannel, AcceptAckMsg.MSG_CODE, this::uponAcceptAckMsg, this::uponMessageFailed);
         registerMessageHandler(peerChannel, AcceptMsg.MSG_CODE, this::uponAcceptMsg, this::uponMessageFailed);
 
-
+        
+        
         //注册时钟
         registerTimerHandler(FlushMsgTimer.TIMER_ID, this::onFlushMsgTimer);
         // FIXME: 2023/6/20 这里的Reconnect和控制层的Reconnect重了，需要单独设置一份重连的时钟
         registerTimerHandler(ReconnectDataTimer.TIMER_ID, this::onReconnectDataTimer);
 
 
-        //接收从front的 写  和  读请求
+        
+        
+        //接收从front的 写 请求
         registerRequestHandler(SubmitBatchRequest.REQUEST_ID, this::onSubmitBatch);
 
 
@@ -197,11 +195,14 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         
         
 
-        // 注册通道时间
+        // 注册通道事件
         registerChannelEventHandler(peerChannel, OutConnectionDown.EVENT_ID, this::onOutConnectionDown);
         registerChannelEventHandler(peerChannel, OutConnectionUp.EVENT_ID, this::onOutConnectionUp);
         registerChannelEventHandler(peerChannel, OutConnectionFailed.EVENT_ID, this::onOutConnectionFailed);
-
+        registerChannelEventHandler(peerChannel, InConnectionDown.EVENT_ID, this::uponInConnectionDown);
+        registerChannelEventHandler(peerChannel, InConnectionUp.EVENT_ID, this::uponInConnectionUp);
+        
+        
         logger.info("TPOChaindata开启: ");
     }
 
@@ -681,6 +682,8 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
             if (!leader.getAddress().equals(self.getAddress()))
                 openConnection(leader, peerChannel);
         }
+        
+        this.canHandleQequest=notification.isCanHandleRequest();
     }
     
     // 在包含 线程号  是否为前链标志   nextokFront   nextOkBack
@@ -714,13 +717,11 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
             logger.info("New nextOkFront: " + nextOkBack.getAddress());
             openConnection(nextOkBack, peerChannel);
         }
+        
     }
     
     
-    
-    protected  void  oncanHandleQequestChange(){
-        this
-    }
+
     
     
     
@@ -813,7 +814,20 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
             setupTimer(new ReconnectDataTimer(nextOkBack), 5000);
         }
     }
-
+    
+    //无实际动作
+    private void uponInConnectionUp(InConnectionUp event, int channel) {
+        if (logger.isDebugEnabled()){
+            logger.debug(event);
+        }
+    }
+    
+    //无实际动作
+    private void uponInConnectionDown(InConnectionDown event, int channel) {
+        if (logger.isDebugEnabled()){
+            logger.debug(event);
+        }
+    }
 
     /**
      * 与 相应的尝试重新建立连接
@@ -834,9 +848,13 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
             openConnection(timer.getHost());
         }
     }
+    
 
 
     
+    
+
+
     /**
      * 发送消息给自己和其他主机 也就是accept和ack信息
      */

@@ -1,6 +1,6 @@
 package TPOChain.notifications;
 
-import frontend.ops.OpBatch;
+
 import pt.unl.fct.di.novasys.babel.generic.ProtoNotification;
 import pt.unl.fct.di.novasys.network.data.Host;
 
