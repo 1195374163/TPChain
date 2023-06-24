@@ -71,7 +71,7 @@ public class HashMapApp implements Application {
         opMapper = new ConcurrentHashMap<>();
         int port = Integer.parseInt(configProps.getProperty("app_port"));
         Babel babel = Babel.getInstance();
-        EventLoopGroup consensusWorkerGroup = NetworkManager.createNewWorkerGroup();
+        EventLoopGroup consensusWorkerGroup     = NetworkManager.createNewWorkerGroup();
         EventLoopGroup consensusdataWorkerGroup = NetworkManager.createNewWorkerGroup();
         String alg = configProps.getProperty("algorithm");
         int nFrontends = Short.parseShort(configProps.getProperty("n_frontends"));
@@ -79,9 +79,8 @@ public class HashMapApp implements Application {
         GenericProtocol consensusProto;
         GenericProtocol consensusdata = null;
 
-
-        int availableProcessors = Runtime.getRuntime().availableProcessors();
-        logger.info("Available Processors: " + availableProcessors);
+        //int availableProcessors = Runtime.getRuntime().availableProcessors();
+        //logger.info("Available Processors: " + availableProcessors);
         
         switch (alg) {
             case "chain_mixed":
@@ -176,11 +175,12 @@ public class HashMapApp implements Application {
         
         for (FrontendProto frontendProto : frontendProtos)
             frontendProto.init(configProps);
-        consensusProto.init(configProps);
         if (consensusdata!=null){
             consensusdata.init(configProps);
         }
-     
+        consensusProto.init(configProps);
+        
+        
         //线程开
         babel.start();
 

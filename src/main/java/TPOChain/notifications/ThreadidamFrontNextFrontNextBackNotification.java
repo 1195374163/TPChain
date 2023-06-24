@@ -20,7 +20,16 @@ public class ThreadidamFrontNextFrontNextBackNotification extends ProtoNotificat
         this.nextOkFront=nextOkFront;
         this.nextOkBack=nextOkBack;
     }
-    
+
+    @Override
+    public String toString() {
+        return "ThreadidamFrontNextFrontNextBackNotification{" +
+                "amFront=" + amFront +
+                ", threadid=" + threadid +
+                ", nextOkFront=" + nextOkFront +
+                ", nextOkBack=" + nextOkBack +
+                '}';
+    }
     public boolean isAmFront() {
         return amFront;
     }

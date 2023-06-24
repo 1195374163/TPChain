@@ -135,6 +135,11 @@ public class TPOChainFront extends FrontendProto {
         lastReadBatchTime = System.currentTimeMillis();
     }
 
+    
+    
+    
+    
+    
 
 
     /**
@@ -226,6 +231,7 @@ public class TPOChainFront extends FrontendProto {
     }
     
 
+    
     //----------  TIMERS  ----
     
     /**
@@ -255,6 +261,7 @@ public class TPOChainFront extends FrontendProto {
 
 
 
+    
     
      //Notice front只连接到 writeto即 leader节点，对于其他节点不连接
     

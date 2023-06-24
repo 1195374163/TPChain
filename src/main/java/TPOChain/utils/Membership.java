@@ -451,6 +451,10 @@ public class Membership {
     }
     
     
+    public List<Host> getFrontChain(){
+        return new ArrayList<>(frontChain);
+    }
+    
     @Override
     public String toString() {
         return "{" +
