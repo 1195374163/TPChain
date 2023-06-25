@@ -1809,7 +1809,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                     if (ins!=null && ins.acceptedValue!=null)
                         break;
                 }
-            }else {
+            }else {//等于true
                 continue;
             }
         }
