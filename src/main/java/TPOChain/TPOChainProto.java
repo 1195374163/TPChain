@@ -3,6 +3,7 @@ package TPOChain;
 import TPOChain.ipc.SubmitOrderMsg;
 import TPOChain.ipc.SubmitReadRequest;
 import TPOChain.notifications.FrontChainNotification;
+import TPOChain.notifications.FrontIndexNotification;
 import TPOChain.notifications.LeaderNotification;
 import TPOChain.notifications.ThreadidamFrontNextFrontNextBackNotification;
 import TPOChain.utils.*;
@@ -302,8 +303,9 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
 
     
     // 代表Data端的主机
-    private  List<Host> frontChain=new ArrayList<>();
-
+    private  List<InetAddress> frontChain=new ArrayList<>();
+    
+    private  List<InetAddress>  backChain=new ArrayList<>();
     //todo 以消息的投票数决定发到下一个前链节点(少于F+1)，还是发往后链节点(>=F+1)
     // 在commandleader被替换时注意(即进行mark之后)，断开前的那个节点要往新的节点以及ack到accept的
     // 全局日志，以及所有局部日志，重发ack信息
@@ -333,6 +335,10 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
 
 
     //todo 在leader宕机时，只是前链节点转发新的客户端消息不能进行，老消息可以继续进行
+
+
+    // 执行机构
+    private Thread executionSortThread;
     
     
     /**
@@ -373,6 +379,9 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
 
         this.state = TPOChainProto.State.valueOf(props.getProperty(INITIAL_STATE_KEY));
         seeds = readSeeds(props.getProperty(INITIAL_MEMBERSHIP_KEY));//返回的是LinkedList<Host>
+
+        //执行线程
+        //this.executionSortThread = new Thread(this::execLoop,  PROTOCOL_ID+ "-" + PROTOCOL_NAME+"execution");
     }
 
     /**
@@ -497,6 +506,9 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         }
 
         logger.info("TPOChainProto: " + membership + " qs " + QUORUM_SIZE);
+
+
+       // executionSortThread.start();
     }
     
 
@@ -531,12 +543,24 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             ConcurrentMap<Integer, InstanceState>  ins=new ConcurrentHashMap<>();
             instances.put(temp.getAddress(),ins);
         }
-
+        
+        // 复制前链
         List<Host> tmpfrontChain= membership.getFrontChain();
         for (int i=0;i<tmpfrontChain.size();i++){
-            frontChain.add(new Host(tmpfrontChain.get(i).getAddress(),DATA_PORT));
+            frontChain.add(tmpfrontChain.get(i).getAddress());
         }
+        
+        //复制后链
+        List<Host> tmpbackChain= membership.getBackChain();
+        for (int i=0;i<tmpbackChain.size();i++){
+            backChain.add(tmpbackChain.get(i).getAddress());
+        }
+        
+        // 往data层传输前链和后链
         triggerFrontChainChange();
+        
+        
+        
         //当判断当前节点是否为前链节点
         if(membership.frontChainContain(self)){
             if (logger.isDebugEnabled()){
@@ -544,7 +568,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             }
             frontChainNodeAction();
         }else {
-            triggerThreadidamFrontNextFrontNextBackChange();
+           // triggerThreadidamFrontNextFrontNextBackChange();
         }
     }
     
@@ -569,7 +593,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         nextOkFront =membership.nextLivingInFrontedChain(self);
         nextOkBack=membership.nextLivingInBackChain(self);
         
-        triggerThreadidamFrontNextFrontNextBackChange();
+        //triggerThreadidamFrontNextFrontNextBackChange();
         
         if (logger.isDebugEnabled()){
             logger.debug("在frontChainNodeAction()结尾处nextOkFront是"+nextOkFront+"; nextOkBack是"+nextOkBack);
@@ -715,6 +739,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     
     
     
+    
     /*
      * 处理PrepareMsg消息
      */
@@ -763,6 +788,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             }
             sendOrEnqueue(new DecidedCLMsg(msg.iN, msg.sN, values), from);
         }
+    
     }
 
     
@@ -807,6 +833,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     private void triggerMembershipChangeNotification() {
         //调用这里说明supportleader肯定不为null
         Host  host=membership.appendFrontChainNode(self,supportedLeader());
+        // TODO: 2023/6/25  触发前链时附加一个多少前链标记 
         if(host!=null){// 说明是后链节点，有附加的前链节点
             triggerNotification(new MembershipChange(
                     membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
@@ -817,9 +844,18 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                     membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
                     null, self.getAddress(), null));
             logger.warn("当前节点是前链"+self.toString());
+            triggerIndexChange();
         }
+
+
     }
 
+    private  void  triggerIndexChange(){
+        triggerNotification(new FrontIndexNotification(
+               membership.frontIndexOf(self)));
+        logger.warn("当前节点是前链"+self.toString());
+    }
+    
     
     
     /**
@@ -827,30 +863,30 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      * */
     // 触发leader 和  can
     private  void   triggerThreadidamFrontNextFrontNextBackChange(){
-       
-        //前链节点
-        if (nextOkFront!=null &&nextOkBack!=null){
-            triggerNotification(new ThreadidamFrontNextFrontNextBackNotification(
-                    amFrontedNode,threadid,new Host(nextOkFront.getAddress(),DATA_PORT),new Host(nextOkBack.getAddress(),DATA_PORT)) );
-            return;
-        }
-        // 后链非链尾
-        if (nextOkFront==null && nextOkBack!=null){
-            triggerNotification(new ThreadidamFrontNextFrontNextBackNotification(
-                    amFrontedNode,threadid,null,new Host(nextOkBack.getAddress(),DATA_PORT)) );
-            return;
-        }
-        //后链链尾
-        if (nextOkFront==null && nextOkBack==null){
-            triggerNotification(new ThreadidamFrontNextFrontNextBackNotification(
-                    amFrontedNode,threadid,null,null) );
-            return;
-        }
-        //没有后链的前链节点
-        if (nextOkFront!=null && nextOkBack==null){
-            triggerNotification(new ThreadidamFrontNextFrontNextBackNotification(
-                    amFrontedNode,threadid,new Host(nextOkFront.getAddress(),DATA_PORT),null) );
-        }
+        //
+        ////前链节点
+        //if (nextOkFront!=null &&nextOkBack!=null){
+        //    triggerNotification(new ThreadidamFrontNextFrontNextBackNotification(
+        //            amFrontedNode,threadid,new Host(nextOkFront.getAddress(),DATA_PORT),new Host(nextOkBack.getAddress(),DATA_PORT)) );
+        //    return;
+        //}
+        //// 后链非链尾
+        //if (nextOkFront==null && nextOkBack!=null){
+        //    triggerNotification(new ThreadidamFrontNextFrontNextBackNotification(
+        //            amFrontedNode,threadid,null,new Host(nextOkBack.getAddress(),DATA_PORT)) );
+        //    return;
+        //}
+        ////后链链尾
+        //if (nextOkFront==null && nextOkBack==null){
+        //    triggerNotification(new ThreadidamFrontNextFrontNextBackNotification(
+        //            amFrontedNode,threadid,null,null) );
+        //    return;
+        //}
+        ////没有后链的前链节点
+        //if (nextOkFront!=null && nextOkBack==null){
+        //    triggerNotification(new ThreadidamFrontNextFrontNextBackNotification(
+        //            amFrontedNode,threadid,new Host(nextOkFront.getAddress(),DATA_PORT),null) );
+        //}
     }
 
     
@@ -865,7 +901,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     
     private  void  triggerFrontChainChange(){
         triggerNotification(new FrontChainNotification(
-                frontChain));
+                frontChain,backChain));
     }
     
     
@@ -1102,6 +1138,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             canHandleQequest=true;
         }
         triggerLeaderChange();
+
+        
     }
 
 
@@ -1763,12 +1801,27 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     // 所以每次分发消息或 排序消息达到执行要求后，都要对从
     // 全局日志的已经ack到当前decided之间的消息进行扫描，达到命令执行的要求
     // 从execute到ack的开始执行
- 
+
+
+    private void execLoop() { 
+        while(true){
+            if (execute()==false){
+                Map<Integer, InstanceState> tagetMap=instances.get(lacknode.getAddress());
+                while(true){
+                    InstanceState ins= tagetMap.get(lackid);
+                    if (ins!=null && ins.acceptedValue!=null)
+                        break;
+                }
+            }else {
+                continue;
+            }
+        }
+    }
     
     private  Host lacknode;
     private  int   lackid;
     //按照全局日志表执行命令:执行的是用户请求命令
-    private void execute(){
+    private boolean execute(){
         // 是使用调用处循环，还是方法内部使用循环?  外部使用
         for (int i=highestExecuteInstanceCl+1;i<= highestDecidedInstanceCl;i++){
             InstanceStateCL  globalInstanceTemp=globalinstances.get(i);
@@ -1782,6 +1835,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                 if (i<highestAcknowledgedInstanceCl){
                     gcAndRead(i,globalInstanceTemp,null,-1);
                 }
+                return true;
             }else {// 是排序消息
                 SortValue sortTarget= (SortValue)globalInstanceTemp.acceptedValue;
                 Host  tempHost=sortTarget.getNode();
@@ -1802,15 +1856,17 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                             logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+sortTarget+";对应的分发实例的值为空，还在填充中");
                         }
                     }
-                    return ;// 不能进行执行,结束执行
+                    return false;// 不能进行执行,结束执行
                 }
                 triggerNotification(new ExecuteBatchNotification(((AppOpBatch) ins.acceptedValue).getBatch()));
                 highestExecuteInstanceCl++;
                 if (i<highestAcknowledgedInstanceCl){
                     gcAndRead(i,globalInstanceTemp,tagetMap,iNtarget);
                 }
+                return true;
             }
         }
+        return true;
     }
     
     //这里也包括了GC(垃圾收集)模块 垃圾收集 既对局部日志GC也对全局日志进行GC，即是使用对应数据结构的remove方法 对单个实例在进行ack时调用这个垃圾收集并进行触发读处理
@@ -2583,6 +2639,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     }
 
 
+    
     
 
 

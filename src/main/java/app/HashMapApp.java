@@ -73,12 +73,13 @@ public class HashMapApp implements Application {
         Babel babel = Babel.getInstance();
         EventLoopGroup consensusWorkerGroup     = NetworkManager.createNewWorkerGroup();
         EventLoopGroup consensusdataWorkerGroup = NetworkManager.createNewWorkerGroup();
+        EventLoopGroup consensusdataWorkerGroup2 = NetworkManager.createNewWorkerGroup();
         String alg = configProps.getProperty("algorithm");
         int nFrontends = Short.parseShort(configProps.getProperty("n_frontends"));
         frontendProtos = new LinkedList<>();//frontendProtos是List<FrontendProto> frontendProtos;
         GenericProtocol consensusProto;
         GenericProtocol consensusdata = null;
-
+        GenericProtocol consensusdata2=null;
         //int availableProcessors = Runtime.getRuntime().availableProcessors();
         //logger.info("Available Processors: " + availableProcessors);
         
@@ -156,7 +157,8 @@ public class HashMapApp implements Application {
             case "TPOChain":
                 for (short i = 0; i < nFrontends; i++)
                     frontendProtos.add(new TPOChainFront(configProps, i, this));
-                consensusdata  =new  TPOChainData(configProps,consensusdataWorkerGroup);
+                consensusdata  =new  TPOChainData(configProps,(short)0,consensusdataWorkerGroup);
+                consensusdata2  =new TPOChainData(configProps,(short)1,consensusdataWorkerGroup2);
                 consensusProto = new TPOChainProto(configProps, consensusWorkerGroup);
                 break;
             default:
@@ -168,7 +170,8 @@ public class HashMapApp implements Application {
         for (FrontendProto frontendProto : frontendProtos)
             babel.registerProtocol(frontendProto);
         if (consensusdata!=null){
-            babel.registerProtocol(consensusdata); 
+            babel.registerProtocol(consensusdata);
+            babel.registerProtocol(consensusdata2);
         }
         babel.registerProtocol(consensusProto);
 
@@ -177,6 +180,7 @@ public class HashMapApp implements Application {
             frontendProto.init(configProps);
         if (consensusdata!=null){
             consensusdata.init(configProps);
+            consensusdata2.init(configProps);
         }
         consensusProto.init(configProps);
         

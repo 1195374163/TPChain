@@ -1,5 +1,6 @@
 package TPOChain;
 
+import TPOChain.notifications.FrontIndexNotification;
 import frontend.FrontendProto;
 import app.Application;
 import chainpaxos.ipc.ExecuteReadReply;
@@ -68,7 +69,8 @@ public class TPOChainFront extends FrontendProto {
     //ToSubmit reads
     private List<byte[]> readDataBuffer;
 
-
+    
+    private  int index;
 
     public TPOChainFront(Properties props, short protoIndex, Application app) throws IOException {
         super(PROTOCOL_NAME_BASE + protoIndex, (short) (PROTOCOL_ID_BASE + protoIndex),
@@ -129,7 +131,10 @@ public class TPOChainFront extends FrontendProto {
         
         //接收来自 proto的请求
         registerReplyHandler(ExecuteReadReply.REPLY_ID, this::onExecuteRead);
-        
+
+
+        subscribeNotification(FrontIndexNotification.NOTIFICATION_ID, this::onFrontIndexNotificationChange);
+
         
         lastWriteBatchTime = System.currentTimeMillis();
         lastReadBatchTime = System.currentTimeMillis();
@@ -214,7 +219,7 @@ public class TPOChainFront extends FrontendProto {
     protected void onPeerBatchMessage(PeerBatchMessage msg, Host from, short sProto, int channel) {
         //sendRequest(new SubmitBatchRequest(msg.getBatch()), TPOChainProto.PROTOCOL_ID);
         // 这里改为了向data层发送请求
-        sendRequest(new SubmitBatchRequest(msg.getBatch()),TPOChainData.PROTOCOL_ID);
+        sendRequest(new SubmitBatchRequest(msg.getBatch()),(short)(TPOChainData.PROTOCOL_ID+index));
     }
 
 
@@ -368,7 +373,8 @@ public class TPOChainFront extends FrontendProto {
      * logger.info("New writesTo: " + writesTo.getAddress());
      * */
     protected void onMembershipChange(MembershipChange notification, short emitterId) {
-
+        
+     
         //update membership and responder
         membership = notification.getOrderedMembers();
 
@@ -387,4 +393,11 @@ public class TPOChainFront extends FrontendProto {
         }
     }
     
+    
+    /**
+     * 发送请求改变选择哪个通道
+     * */
+    protected void onFrontIndexNotificationChange(FrontIndexNotification notification,short emitterID){
+        this.index=notification.getIndex();
+    }
 }

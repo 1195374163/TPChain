@@ -450,9 +450,19 @@ public class Membership {
         return members.size();
     }
     
-    
+    // 返回前链
     public List<Host> getFrontChain(){
         return new ArrayList<>(frontChain);
+    }
+    // 返回后链
+    public  List<Host>  getBackChain(){
+        List<Host>  tmp=new ArrayList<>();
+        for (Host em:backChain){
+            if (!pendingRemoval.contains(em)){
+                tmp.add(em);
+            }
+        }
+        return  tmp;
     }
     
     @Override

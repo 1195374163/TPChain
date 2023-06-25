@@ -14,6 +14,10 @@ public class MembershipChange extends ProtoNotification {
     private final InetAddress readsTo;
     private final InetAddress writeResponder;
 
+
+    
+    
+    
     public MembershipChange(List<InetAddress> orderedMembers, InetAddress readsTo,
                             InetAddress writesTo, InetAddress writeResponder) {
         super(NOTIFICATION_ID);
@@ -21,8 +25,13 @@ public class MembershipChange extends ProtoNotification {
         this.readsTo = readsTo;
         this.writesTo = writesTo;
         this.writeResponder = writeResponder;
+
     }
 
+    
+    
+
+    
     public InetAddress getReadsTo() {
         return readsTo;
     }

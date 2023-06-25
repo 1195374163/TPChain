@@ -4,16 +4,18 @@ package TPOChain.notifications;
 import pt.unl.fct.di.novasys.babel.generic.ProtoNotification;
 import pt.unl.fct.di.novasys.network.data.Host;
 
+import java.net.InetAddress;
+
 public class ThreadidamFrontNextFrontNextBackNotification extends ProtoNotification {
 
     public static final short NOTIFICATION_ID = 201;
     
     private final boolean  amFront;
     private final short threadid;
-    private final Host nextOkFront;
-    private final Host nextOkBack;
+    private final InetAddress nextOkFront;
+    private final InetAddress nextOkBack;
     
-    public ThreadidamFrontNextFrontNextBackNotification(boolean  amFront,short threadid,Host nextOkFront,Host nextOkBack) {
+    public ThreadidamFrontNextFrontNextBackNotification(boolean  amFront,short threadid,InetAddress nextOkFront,InetAddress nextOkBack) {
         super(NOTIFICATION_ID);
         this.amFront=amFront;
         this.threadid=threadid;
@@ -38,11 +40,11 @@ public class ThreadidamFrontNextFrontNextBackNotification extends ProtoNotificat
         return threadid;
     }
     
-    public Host getNextOkFront() {
+    public InetAddress getNextOkFront() {
         return nextOkFront;
     }
     
-    public Host getNextOkBack() {
+    public InetAddress getNextOkBack() {
         return nextOkBack;
     }
 }
