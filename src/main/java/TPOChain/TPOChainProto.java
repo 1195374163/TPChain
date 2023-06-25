@@ -46,7 +46,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     
     public static final String ADDRESS_KEY = "consensus_address";
     public static final String PORT_KEY = "consensus_port";
-    //这里将 nextokfront和nextokBack的端口改为data_port
+
     public  static final String DATA_PORT_KEY = "data_port";
     
     
@@ -195,6 +195,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     
     
     
+    
     //标记前链节点能否开始处理客户端的请求
     private boolean canHandleQequest;
     
@@ -221,6 +222,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     
     // 加一个锁能对下面数据的访问: 对全局日志参数的访问
     private final Object executeLock = new Object();
+    
     
     /**
      * leader这是主要排序阶段使用
@@ -1134,12 +1136,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             logger.debug("收到选举成功消息"+msg + " from:" + from);
         }
         setNewInstanceLeader(msg.iN, msg.sN);
-        if (amFrontedNode){
-            canHandleQequest=true;
-        }
+        canHandleQequest=true;
         triggerLeaderChange();
-
-        
     }
 
 
@@ -1160,7 +1158,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                 if (logger.isDebugEnabled()){
                     logger.debug("leader 时钟超时自动发送noop消息");
                 }
-                
                 sendNextAcceptCL(new NoOpValue());
         } else {
             logger.warn(timer + " while not quorumLeader");
@@ -1835,7 +1832,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                 if (i<highestAcknowledgedInstanceCl){
                     gcAndRead(i,globalInstanceTemp,null,-1);
                 }
-                return true;
             }else {// 是排序消息
                 SortValue sortTarget= (SortValue)globalInstanceTemp.acceptedValue;
                 Host  tempHost=sortTarget.getNode();
@@ -1863,7 +1859,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                 if (i<highestAcknowledgedInstanceCl){
                     gcAndRead(i,globalInstanceTemp,tagetMap,iNtarget);
                 }
-                return true;
             }
         }
         return true;

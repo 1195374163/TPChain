@@ -10,7 +10,7 @@ import java.util.Map;
 public interface ShareDistrubutedInstances {
     
     //局部日志
-    Map<InetAddress,Map<Integer, InstanceState>> instances = new HashMap<>(6000);
+    Map<InetAddress,Map<Integer, InstanceState>> instances = new HashMap<>(8000);
     
     
     // 局部日志的配置表
