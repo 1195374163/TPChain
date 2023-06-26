@@ -1837,7 +1837,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     
     
     private void gcLoop(){
-        logger.info("进入GC初始状态");
+        //logger.info("进入GC初始状态");
         int highestAcknowledgedInstanceClback;
         while(true){
             highestAcknowledgedInstanceClback=highestAcknowledgedInstanceCl.get()-5;
