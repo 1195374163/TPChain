@@ -32,6 +32,7 @@ import java.net.UnknownHostException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedInstances{
@@ -225,10 +226,10 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     /**
      * leader这是主要排序阶段使用
      * */
-    private int highestGarbageCollectionCl= -1;
-    private int highestAcknowledgedInstanceCl = -1;
-    private int highestExecuteInstanceCl= -1; 
-    private int highestDecidedInstanceCl = -1;
+    private int highestGarbageCollectionCl=-1;
+    private AtomicInteger highestAcknowledgedInstanceCl = new AtomicInteger(-1);
+    private AtomicInteger highestExecuteInstanceCl= new AtomicInteger(-1) ; 
+    private AtomicInteger highestDecidedInstanceCl = new AtomicInteger(-1);
     private int highestAcceptedInstanceCl = -1;
     
     //leader使用，即使发生leader交换时，由新leader接棒
@@ -545,9 +546,17 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         
         //next:因为需要全连接作为成员管控
         members.stream().filter(h -> !h.equals(self)).forEach(this::openConnection);
+        //joiningInstanceCl = highestGarbageCollectionCl=highestAcceptedInstanceCl = highestExecuteInstanceCl =highestAcknowledgedInstanceCl = highestDecidedInstanceCl =
+        //        instanceNumber;// instanceNumber初始为-1,但对于
         //对全局的排序消息进行配置  -1
-        joiningInstanceCl = highestGarbageCollectionCl=highestAcceptedInstanceCl = highestExecuteInstanceCl =highestAcknowledgedInstanceCl = highestDecidedInstanceCl =
-                instanceNumber;// instanceNumber初始为-1,但对于
+        joiningInstanceCl =highestAcceptedInstanceCl = instanceNumber;// instanceNumber初始为-1,但对于
+        //对全局的排序消息进行配置  -1
+        
+        highestGarbageCollectionCl=instanceNumber;
+        highestExecuteInstanceCl.set(instanceNumber);
+        highestAcknowledgedInstanceCl.set(instanceNumber);
+        highestDecidedInstanceCl.set(instanceNumber);
+        
         //对命令分发进行初始化配置
         for (Host tempHost:members) {
             InetAddress temp=tempHost.getAddress();
@@ -561,7 +570,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             instances.put(temp,ins);
             
             //接收到的
-            hostReceive.put(temp,-1);
+            hostReceive.put(temp,new AtomicInteger(-1));
         }
         triggerInitializeCompletedNotification();
         // 复制前链
@@ -663,7 +672,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //这instances是Map<Integer, InstanceState> instances
         //currentSN是Map.Entry<Integer, SeqN>类型数据
         //为什么是ack信息，保证日志的连续
-        InstanceStateCL instance = globalinstances.computeIfAbsent(highestAcknowledgedInstanceCl + 1, InstanceStateCL::new);
+        InstanceStateCL instance = globalinstances.computeIfAbsent(highestAcknowledgedInstanceCl.get() + 1, InstanceStateCL::new);
         
         //private Map.Entry<Integer, SeqN> currentSN是
         //currentSN初始值是new AbstractMap.SimpleEntry<>(-1, new SeqN(-1, null));
@@ -721,7 +730,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             return;
         }
         
-        if (msg.iN > highestAcknowledgedInstanceCl) {
+        if (msg.iN > highestAcknowledgedInstanceCl.get()) {
             // currentSN消息是private Map.Entry<Integer, SeqN> currentSN;
             assert msg.iN >= currentSN.getKey();
             //在msg中大于此节点的选举领导信息
@@ -745,8 +754,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
              若发送prepare消息的节点比接收prepare消息的节点信息落后，可以发送已经DecidedMsg信息
              */
             logger.info("Responding with decided");
-            List<AcceptedValueCL> values = new ArrayList<>(highestDecidedInstanceCl - msg.iN + 1);
-            for (int i = msg.iN; i <= highestDecidedInstanceCl; i++) {
+            List<AcceptedValueCL> values = new ArrayList<>(highestDecidedInstanceCl.get() - msg.iN + 1);
+            for (int i = msg.iN; i <= highestDecidedInstanceCl.get(); i++) {
                 InstanceStateCL decidedInstance = globalinstances.get(i);
                 assert decidedInstance.isDecided();
                 values.add(new AcceptedValueCL(i, decidedInstance.highestAccept, decidedInstance.acceptedValue));
@@ -884,7 +893,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         
         InstanceStateCL instance = globalinstances.get(msg.iN);
         //在实例被垃圾收集  或    msg的实例小于此节点的Decide   或    现在的leader大于msg的leader
-        if (instance == null || msg.iN <= highestDecidedInstanceCl || currentSN.getValue().greaterThan(msg.sN)) {
+        if (instance == null || msg.iN <= highestDecidedInstanceCl.get() || currentSN.getValue().greaterThan(msg.sN)) {
             logger.warn("Late decided... ignoring");
             return;
         }
@@ -948,7 +957,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         }
         
         //在实例被垃圾收集  或   已经进行更高的ack  或   现在的leader比msg中的leader更大时
-        if (instance == null || msg.iN <= highestAcknowledgedInstanceCl || currentSN.getValue().greaterThan(msg.sN)) {
+        if (instance == null || msg.iN <= highestAcknowledgedInstanceCl.get() || currentSN.getValue().greaterThan(msg.sN)) {
             logger.warn("Late prepareOk... ignoring");
             return;
         }
@@ -1036,7 +1045,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             assert aI.highestAccept != null;
             //goes to the end of the queue
             this.deliverMessageIn(new MessageInEvent(new BabelMessage(new AcceptCLMsg(i, currentSN.getValue(), (short) 0,
-                    aI.acceptedValue, highestAcknowledgedInstanceCl), (short)-1, (short)-1), self, peerChannel));
+                    aI.acceptedValue, highestAcknowledgedInstanceCl.get()), (short)-1, (short)-1), self, peerChannel));
         }
 
         //标记leader发送到下一个节点到哪了
@@ -1182,7 +1191,16 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      * 生成排序消息发给
      * **/
     private void sendNextAcceptCL(PaxosValue val) {
-        InstanceStateCL instance = globalinstances.computeIfAbsent(lastAcceptSentCl + 1, InstanceStateCL::new);
+
+        InstanceStateCL instance;
+        if (!globalinstances.containsKey(lastAcceptSentCl + 1)) {
+            instance=new InstanceStateCL(lastAcceptSentCl + 1);
+            globalinstances.put(lastAcceptSentCl + 1, instance);
+        }else {
+            instance=globalinstances.get(lastAcceptSentCl + 1);
+        }
+        
+        //InstanceStateCL instance = globalinstances.computeIfAbsent(lastAcceptSentCl + 1, InstanceStateCL::new);
         
         PaxosValue nextValue = null;
         if (val.type== PaxosValue.Type.SORT){
@@ -1211,7 +1229,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
 
         //直接传递处理通道中
         deliverMessageIn(new MessageInEvent(new BabelMessage(new AcceptCLMsg(instance.iN, currentSN.getValue(),
-                (short) 0, nextValue, highestAcknowledgedInstanceCl), (short)-1, (short)-1), self, peerChannel));
+                (short) 0, nextValue, highestAcknowledgedInstanceCl.get()), (short)-1, (short)-1), self, peerChannel));
         
         //更新发送标记
         lastAcceptSentCl = instance.iN;
@@ -1305,7 +1323,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         if (!instance.isDecided() && instance.counter >= QUORUM_SIZE) //We have quorum!
             decideAndExecuteCL(instance);//决定并执行实例
         
-        if (msg.ack>highestAcknowledgedInstanceCl)
+        if (msg.ack>highestAcknowledgedInstanceCl.get())
              ackInstanceCL(msg.ack);//对于之前的实例进行ack并进行垃圾收集
     }
 
@@ -1584,7 +1602,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         
         //正常转发有两种情况： 在前链中转发  在后链中转发
         AcceptCLMsg msg = new AcceptCLMsg(inst.iN, inst.highestAccept, inst.counter, inst.acceptedValue,
-                highestAcknowledgedInstanceCl);
+                highestAcknowledgedInstanceCl.get());
         if (nextOkFront!=null){//是前链
             if (inst.counter < QUORUM_SIZE   ){// 投票数不满F+1，发往nextOkFront
                 //if (logger.isDebugEnabled()){
@@ -1639,7 +1657,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         }
         // FIXME: 2023/6/26 如果加入执行线程那么，上面的decide++ 应该放在执行之后
         instance.markDecided();
-        highestDecidedInstanceCl++;
+        highestDecidedInstanceCl.incrementAndGet();
     }
 
     /**
@@ -1680,7 +1698,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             if (state == TPOChainProto.State.ACTIVE) {
                 //运行到这个方法说明已经满足大多数了
                 sendMessage(new JoinSuccessMsg(instance.iN, instance.highestAccept, membership.shallowCopy()), target);
-                assert highestDecidedInstanceCl == instance.iN;
+                //assert highestDecidedInstanceCl == instance.iN;
                 //TODO need mechanism for joining node to inform nodes they can forget stored state
                 pendingSnapshots.put(target, MutablePair.of(instance.iN, instance.counter == QUORUM_SIZE));
                 sendRequest(new GetSnapshotRequest(target, instance.iN), TPOChainFront.PROTOCOL_ID_BASE);
@@ -1708,7 +1726,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //}
 
         //For nodes in the first half of the chain only
-        for (int i = highestDecidedInstanceCl + 1; i <= instanceN; i++) {
+        for (int i = highestDecidedInstanceCl.get() + 1; i <= instanceN; i++) {
             InstanceStateCL ins = globalinstances.get(i);
             //assert !ins.isDecided();
             decideAndExecuteCL(ins);
@@ -1717,7 +1735,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         
         // 进行ack信息的更新
         // 使用++ 还是直接赋值好 
-        highestAcknowledgedInstanceCl++;
+        highestAcknowledgedInstanceCl.incrementAndGet();
         
         
         //当ack小于等于exec，进行GC清理
@@ -1743,7 +1761,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //    logger.debug("接收"+from+"的"+msg);
         //}
         
-        if (msg.instanceNumber <= highestAcknowledgedInstanceCl) {
+        if (msg.instanceNumber <= highestAcknowledgedInstanceCl.get()) {
             logger.warn("Ignoring acceptAckCL for old instance: " + msg);
             return;
         }
@@ -1756,7 +1774,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         }
         
         //这里下面两行调了顺序
-        if (msg.instanceNumber>highestAcknowledgedInstanceCl)
+        if (msg.instanceNumber>highestAcknowledgedInstanceCl.get())
             ackInstanceCL(msg.instanceNumber);
         // FIXME: 2023/6/15 取消下面这个一直发送的noop消息，在低负载情况下开启
         //if (inst.acceptedValue.type != PaxosValue.Type.NO_OP)
@@ -1776,7 +1794,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     private void execLoop() {
         logger.info("已经进入execLoop初始状态");
         while(true){
-            if (highestDecidedInstanceCl>=0){
+            if (highestDecidedInstanceCl.get()>=0){
                 break;
             }
         }
@@ -1786,13 +1804,13 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         Map<Integer, InstanceState> tagetMap;
         InstanceState ins;
         while(true){
-            int backuphighestDecidedInstanceCl=highestDecidedInstanceCl;
+            int backuphighestDecidedInstanceCl=highestDecidedInstanceCl.get()-2;
             // TODO: 2023/6/26   i是<  还是  <=  影响不大 
-            for (int i=highestExecuteInstanceCl+1;i<= backuphighestDecidedInstanceCl;i++){
+            for (int i=highestExecuteInstanceCl.get()+1;i<= backuphighestDecidedInstanceCl;i++){
                 globalInstanceTemp=globalinstances.get(i);
                 if (globalInstanceTemp.acceptedValue.type!= PaxosValue.Type.SORT){
                     // 那消息可能是成员管理消息  也可能是noop消息
-                    highestExecuteInstanceCl++;
+                    highestExecuteInstanceCl.incrementAndGet();
                     if (logger.isDebugEnabled()){
                         logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+globalInstanceTemp.acceptedValue);
                     }
@@ -1800,18 +1818,18 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                     SortValue sortTarget= (SortValue)globalInstanceTemp.acceptedValue;
                     tempInetAddress=sortTarget.getNode().getAddress();
                     int  iNtarget=sortTarget.getiN();
-                    logger.info("因为对应实例为空，处于等待");
+                    //logger.info("因为对应实例为空，处于等待");
                     while (true){
-                        if (hostReceive.get(tempInetAddress)>iNtarget){
+                        if (hostReceive.get(tempInetAddress).get()>iNtarget){
                             break;
                         }
                     }
-                    logger.info("实例存在，不在等待");
-                    logger.info("执行的是"+tempInetAddress+"的"+iNtarget+"实例");
+                    //logger.info("实例存在，不在等待");
+                    //logger.info("执行的是"+tempInetAddress+"的"+iNtarget+"实例");
                     tagetMap=instances.get(tempInetAddress);
                     ins= tagetMap.get(iNtarget);
                     triggerNotification(new ExecuteBatchNotification(((AppOpBatch) ins.acceptedValue).getBatch()));
-                    highestExecuteInstanceCl++;
+                    highestExecuteInstanceCl.incrementAndGet();
                 }
             }
         }
@@ -1822,7 +1840,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         logger.info("进入GC初始状态");
         int highestAcknowledgedInstanceClback;
         while(true){
-            highestAcknowledgedInstanceClback=highestAcknowledgedInstanceCl;
+            highestAcknowledgedInstanceClback=highestAcknowledgedInstanceCl.get()-5;
             if (highestAcknowledgedInstanceClback>=0) {
                 break;
             }
@@ -1834,8 +1852,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         int iNtarget;
         while(true){
             while(true){
-                int backhighestExecuteInstanceCl     =highestExecuteInstanceCl;
-                int backhighestAcknowledgedInstanceCl=highestAcknowledgedInstanceCl;
+                int backhighestExecuteInstanceCl     =highestExecuteInstanceCl.get();
+                int backhighestAcknowledgedInstanceCl=highestAcknowledgedInstanceCl.get();
                 if (highestGarbageCollectionCl< backhighestExecuteInstanceCl && highestGarbageCollectionCl < backhighestAcknowledgedInstanceCl){
                     break;
                 }
@@ -1865,103 +1883,103 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     //按照全局日志表执行命令:执行的是用户请求命令
     private boolean execute(){
         // 是使用调用处循环，还是方法内部使用循环?  外部使用
-        for (int i=highestExecuteInstanceCl+1;i<= highestDecidedInstanceCl;i++){
-            InstanceStateCL  globalInstanceTemp=globalinstances.get(i);
-            if (globalInstanceTemp.acceptedValue.type!= PaxosValue.Type.SORT){
-                // 那消息可能是成员管理消息  也可能是noop消息
-                highestExecuteInstanceCl++;
-                if (logger.isDebugEnabled()){
-                    logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+globalInstanceTemp.acceptedValue);
-                }
-            }else {// 是排序消息
-                SortValue sortTarget= (SortValue)globalInstanceTemp.acceptedValue;
-                Host  tempHost=sortTarget.getNode();
-                Map<Integer, InstanceState> tagetMap=instances.get(tempHost.getAddress());
-                int  iNtarget=sortTarget.getiN();
-                InstanceState ins= tagetMap.get(iNtarget);
-                //如果分发消息不为空就可以执行
-                if (ins == null ||  ins.acceptedValue ==null){
-                    lacknode=tempHost;
-                    lackid=iNtarget;
-                //if (ins == null || !ins.isDecided()){
-                    if (ins==null){
-                        if (logger.isDebugEnabled()){
-                            logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+sortTarget+";对应的分发实例还没有到位");
-                        }
-                    } else{
-                        if (logger.isDebugEnabled()){
-                            logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+sortTarget+";对应的分发实例的值为空，还在填充中");
-                        }
-                    }
-                    return false;// 不能进行执行,结束执行
-                }
-                triggerNotification(new ExecuteBatchNotification(((AppOpBatch) ins.acceptedValue).getBatch()));
-                highestExecuteInstanceCl++;
-            }
-        }
+        //for (int i=highestExecuteInstanceCl+1;i<= highestDecidedInstanceCl;i++){
+        //    InstanceStateCL  globalInstanceTemp=globalinstances.get(i);
+        //    if (globalInstanceTemp.acceptedValue.type!= PaxosValue.Type.SORT){
+        //        // 那消息可能是成员管理消息  也可能是noop消息
+        //        highestExecuteInstanceCl++;
+        //        if (logger.isDebugEnabled()){
+        //            logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+globalInstanceTemp.acceptedValue);
+        //        }
+        //    }else {// 是排序消息
+        //        SortValue sortTarget= (SortValue)globalInstanceTemp.acceptedValue;
+        //        Host  tempHost=sortTarget.getNode();
+        //        Map<Integer, InstanceState> tagetMap=instances.get(tempHost.getAddress());
+        //        int  iNtarget=sortTarget.getiN();
+        //        InstanceState ins= tagetMap.get(iNtarget);
+        //        //如果分发消息不为空就可以执行
+        //        if (ins == null ||  ins.acceptedValue ==null){
+        //            lacknode=tempHost;
+        //            lackid=iNtarget;
+        //        //if (ins == null || !ins.isDecided()){
+        //            if (ins==null){
+        //                if (logger.isDebugEnabled()){
+        //                    logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+sortTarget+";对应的分发实例还没有到位");
+        //                }
+        //            } else{
+        //                if (logger.isDebugEnabled()){
+        //                    logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+sortTarget+";对应的分发实例的值为空，还在填充中");
+        //                }
+        //            }
+        //            return false;// 不能进行执行,结束执行
+        //        }
+        //        triggerNotification(new ExecuteBatchNotification(((AppOpBatch) ins.acceptedValue).getBatch()));
+        //        highestExecuteInstanceCl++;
+        //    }
+        //}
         return true;
     }
 
     //这里也包括了GC(垃圾收集)模块 垃圾收集 既对局部日志GC也对全局日志进行GC，即是使用对应数据结构的remove方法 对单个实例在进行ack时调用这个垃圾收集并进行触发读处理
     private  void  gcAndRead(int iN,InstanceStateCL globalInstanceTemp,Map<Integer, InstanceState> targetMap,int targetid){
         // 触发读
-        globalInstanceTemp.getAttachedReads().forEach((k, v) -> sendReply(new ExecuteReadReply(v, globalInstanceTemp.iN), k));
-        
-        // 删除全局日志对应日志项
-        globalinstances.remove(iN);
-        
-        // 下面若局部日志存在对方,则也进行GC
-        if (targetMap==null){// 不存在局部日志的话，不应执行那下面几步
-            return ;
-        }
-        
-        //删除局部日志对应的日志项
-        targetMap.remove(targetid);
+        //globalInstanceTemp.getAttachedReads().forEach((k, v) -> sendReply(new ExecuteReadReply(v, globalInstanceTemp.iN), k));
+        //
+        //// 删除全局日志对应日志项
+        //globalinstances.remove(iN);
+        //
+        //// 下面若局部日志存在对方,则也进行GC
+        //if (targetMap==null){// 不存在局部日志的话，不应执行那下面几步
+        //    return ;
+        //}
+        //
+        ////删除局部日志对应的日志项
+        //targetMap.remove(targetid);
     }
     
     
     private boolean executeBack(){
         // 是使用调用处循环，还是方法内部使用循环?  外部使用
-        for (int i=highestExecuteInstanceCl+1;i<= highestDecidedInstanceCl;i++){
-            InstanceStateCL  globalInstanceTemp=globalinstances.get(i);
-            if (globalInstanceTemp.acceptedValue.type!= PaxosValue.Type.SORT){
-                // 那消息可能是成员管理消息  也可能是noop消息
-                highestExecuteInstanceCl++;
-                if (logger.isDebugEnabled()){
-                    logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+globalInstanceTemp.acceptedValue);
-                }
-                if (i<highestAcknowledgedInstanceCl){
-                    gcAndRead(i,globalInstanceTemp,null,-1);
-                }
-            }else {// 是排序消息
-                SortValue sortTarget= (SortValue)globalInstanceTemp.acceptedValue;
-                Host  tempHost=sortTarget.getNode();
-                Map<Integer, InstanceState> tagetMap=instances.get(tempHost.getAddress());
-                int  iNtarget=sortTarget.getiN();
-                InstanceState ins= tagetMap.get(iNtarget);
-                //如果分发消息不为空就可以执行
-                if (ins == null ||  ins.acceptedValue ==null){
-                    lacknode=tempHost;
-                    lackid=iNtarget;
-                    //if (ins == null || !ins.isDecided()){
-                    if (ins==null){
-                        if (logger.isDebugEnabled()){
-                            logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+sortTarget+";对应的分发实例还没有到位");
-                        }
-                    } else{
-                        if (logger.isDebugEnabled()){
-                            logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+sortTarget+";对应的分发实例的值为空，还在填充中");
-                        }
-                    }
-                    return false;// 不能进行执行,结束执行
-                }
-                triggerNotification(new ExecuteBatchNotification(((AppOpBatch) ins.acceptedValue).getBatch()));
-                highestExecuteInstanceCl++;
-                if (i<highestAcknowledgedInstanceCl){
-                    gcAndRead(i,globalInstanceTemp,tagetMap,iNtarget);
-                }
-            }
-        }
+        //for (int i=highestExecuteInstanceCl+1;i<= highestDecidedInstanceCl;i++){
+        //    InstanceStateCL  globalInstanceTemp=globalinstances.get(i);
+        //    if (globalInstanceTemp.acceptedValue.type!= PaxosValue.Type.SORT){
+        //        // 那消息可能是成员管理消息  也可能是noop消息
+        //        highestExecuteInstanceCl++;
+        //        if (logger.isDebugEnabled()){
+        //            logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+globalInstanceTemp.acceptedValue);
+        //        }
+        //        if (i<highestAcknowledgedInstanceCl){
+        //            gcAndRead(i,globalInstanceTemp,null,-1);
+        //        }
+        //    }else {// 是排序消息
+        //        SortValue sortTarget= (SortValue)globalInstanceTemp.acceptedValue;
+        //        Host  tempHost=sortTarget.getNode();
+        //        Map<Integer, InstanceState> tagetMap=instances.get(tempHost.getAddress());
+        //        int  iNtarget=sortTarget.getiN();
+        //        InstanceState ins= tagetMap.get(iNtarget);
+        //        //如果分发消息不为空就可以执行
+        //        if (ins == null ||  ins.acceptedValue ==null){
+        //            lacknode=tempHost;
+        //            lackid=iNtarget;
+        //            //if (ins == null || !ins.isDecided()){
+        //            if (ins==null){
+        //                if (logger.isDebugEnabled()){
+        //                    logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+sortTarget+";对应的分发实例还没有到位");
+        //                }
+        //            } else{
+        //                if (logger.isDebugEnabled()){
+        //                    logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+sortTarget+";对应的分发实例的值为空，还在填充中");
+        //                }
+        //            }
+        //            return false;// 不能进行执行,结束执行
+        //        }
+        //        triggerNotification(new ExecuteBatchNotification(((AppOpBatch) ins.acceptedValue).getBatch()));
+        //        highestExecuteInstanceCl++;
+        //        if (i<highestAcknowledgedInstanceCl){
+        //            gcAndRead(i,globalInstanceTemp,tagetMap,iNtarget);
+        //        }
+        //    }
+        //}
         return true;
     }
     private  void  gcAndReadBack(int iN,InstanceStateCL globalInstanceTemp,Map<Integer, InstanceState> targetMap,int targetid){
@@ -1980,73 +1998,73 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         targetMap.remove(targetid);
     }
     private void ackInstanceCLBack(int instanceN) {
-        //处理初始情况
-        if (instanceN<0){
-            return ;
-        }
-
-        //处理重复消息或过时
-        //if (instanceN<=highestAcknowledgedInstanceCl){
-        //    logger.info("Discarding 重复 acceptackclmsg"+instanceN+"当前highestAcknowledgedInstanceCl是"+highestAcknowledgedInstanceCl);
-        //    return;
+        ////处理初始情况
+        //if (instanceN<0){
+        //    return ;
         //}
-
-        //For nodes in the first half of the chain only
-        for (int i = highestDecidedInstanceCl + 1; i <= instanceN; i++) {
-            InstanceStateCL ins = globalinstances.get(i);
-            //assert !ins.isDecided();
-            decideAndExecuteCL(ins);
-            //assert highestDecidedInstanceCl == i;
-        }
-
-        // 进行ack信息的更新
-        // 使用++ 还是直接赋值好 
-        highestAcknowledgedInstanceCl++;
-
-
-        //当ack小于等于exec，进行GC清理
-        if (highestAcknowledgedInstanceCl<highestExecuteInstanceCl){
-            InstanceStateCL ins = globalinstances.get(highestAcknowledgedInstanceCl);
-            if (ins.acceptedValue.type!= PaxosValue.Type.SORT){
-                gcAndRead(highestAcknowledgedInstanceCl,ins,null,-1);
-            }else {
-                SortValue sortTarget= (SortValue)ins.acceptedValue;
-                Map<Integer, InstanceState>  tagetMap=instances.get(sortTarget.getNode());
-                int  iNtarget=sortTarget.getiN();
-                gcAndRead(highestAcknowledgedInstanceCl,ins,tagetMap,iNtarget);
-            }
-        }
+        //
+        ////处理重复消息或过时
+        ////if (instanceN<=highestAcknowledgedInstanceCl){
+        ////    logger.info("Discarding 重复 acceptackclmsg"+instanceN+"当前highestAcknowledgedInstanceCl是"+highestAcknowledgedInstanceCl);
+        ////    return;
+        ////}
+        //
+        ////For nodes in the first half of the chain only
+        //for (int i = highestDecidedInstanceCl + 1; i <= instanceN; i++) {
+        //    InstanceStateCL ins = globalinstances.get(i);
+        //    //assert !ins.isDecided();
+        //    decideAndExecuteCL(ins);
+        //    //assert highestDecidedInstanceCl == i;
+        //}
+        //
+        //// 进行ack信息的更新
+        //// 使用++ 还是直接赋值好 
+        //highestAcknowledgedInstanceCl++;
+        //
+        //
+        ////当ack小于等于exec，进行GC清理
+        //if (highestAcknowledgedInstanceCl<highestExecuteInstanceCl){
+        //    InstanceStateCL ins = globalinstances.get(highestAcknowledgedInstanceCl);
+        //    if (ins.acceptedValue.type!= PaxosValue.Type.SORT){
+        //        gcAndRead(highestAcknowledgedInstanceCl,ins,null,-1);
+        //    }else {
+        //        SortValue sortTarget= (SortValue)ins.acceptedValue;
+        //        Map<Integer, InstanceState>  tagetMap=instances.get(sortTarget.getNode());
+        //        int  iNtarget=sortTarget.getiN();
+        //        gcAndRead(highestAcknowledgedInstanceCl,ins,tagetMap,iNtarget);
+        //    }
+        //}
     }
     private void decideAndExecuteCLBack(InstanceStateCL instance) {
-        instance.markDecided();
-        highestDecidedInstanceCl++;
-        //if (logger.isDebugEnabled()){
-        //    logger.debug("Decided: " + instance.iN + " - " + instance.acceptedValue);
+        //instance.markDecided();
+        //highestDecidedInstanceCl++;
+        ////if (logger.isDebugEnabled()){
+        ////    logger.debug("Decided: " + instance.iN + " - " + instance.acceptedValue);
+        ////}
+        //// FIXME: 2023/6/26 如果加入执行线程那么，上面的decide++ 应该放在执行之后
+        ////Actually execute message
+        //if (instance.acceptedValue.type == PaxosValue.Type.SORT) {
+        //    if (state == TPOChainProto.State.ACTIVE){
+        //        //synchronized (executeLock){
+        //        //    execute();
+        //        //}
+        //        execute();
+        //    } else  //在节点处于加入join之后，暂存存放的批处理命令
+        //        // TODO: 2023/6/1 这里不对，在加入节点时，不能执行这个 
+        //        bufferedOps.add((SortValue) instance.acceptedValue);
+        //} else if (instance.acceptedValue.type == PaxosValue.Type.MEMBERSHIP) {
+        //    executeMembershipOp(instance);
+        //    //synchronized (executeLock){
+        //    //    execute();
+        //    //}
+        //    execute();
+        //} else if (instance.acceptedValue.type == PaxosValue.Type.NO_OP) {
+        //    //nothing
+        //    //synchronized (executeLock){
+        //    //    execute();
+        //    //}
+        //    execute();
         //}
-        // FIXME: 2023/6/26 如果加入执行线程那么，上面的decide++ 应该放在执行之后
-        //Actually execute message
-        if (instance.acceptedValue.type == PaxosValue.Type.SORT) {
-            if (state == TPOChainProto.State.ACTIVE){
-                //synchronized (executeLock){
-                //    execute();
-                //}
-                execute();
-            } else  //在节点处于加入join之后，暂存存放的批处理命令
-                // TODO: 2023/6/1 这里不对，在加入节点时，不能执行这个 
-                bufferedOps.add((SortValue) instance.acceptedValue);
-        } else if (instance.acceptedValue.type == PaxosValue.Type.MEMBERSHIP) {
-            executeMembershipOp(instance);
-            //synchronized (executeLock){
-            //    execute();
-            //}
-            execute();
-        } else if (instance.acceptedValue.type == PaxosValue.Type.NO_OP) {
-            //nothing
-            //synchronized (executeLock){
-            //    execute();
-            //}
-            execute();
-        }
     }
 
     
@@ -2491,8 +2509,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //next
         members.stream().filter(h -> !h.equals(self)).forEach(this::openConnection);
         //对全局的排序消息进行配置  -1
-        joiningInstanceCl = highestAcceptedInstanceCl = highestAcknowledgedInstanceCl = highestDecidedInstanceCl =
-                instanceNumber;// instanceNumber初始为-1
+        //joiningInstanceCl = highestAcceptedInstanceCl = highestAcknowledgedInstanceCl = highestDecidedInstanceCl =
+        //        instanceNumber;// instanceNumber初始为-1
         //对命令分发进行初始化配置
         for (Host temp:members) {
             //对分发的配置进行初始化  hostConfigureMap
@@ -2790,7 +2808,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         if (membership.contains(event.getNode())) {// 若集群节点含有这个
             establishedConnections.add(event.getNode());
             
-            for (int i = highestAcknowledgedInstanceCl + 1; i <= highestAcceptedInstanceCl; i++) {
+            for (int i = highestAcknowledgedInstanceCl.get() + 1; i <= highestAcceptedInstanceCl; i++) {
                 forwardCL(globalinstances.get(i));
             }
             // FIXME: 2023/6/9 还需要转发分发消息

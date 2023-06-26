@@ -288,7 +288,17 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
 
         // 先得到自己节点的配置信息
         //RuntimeConfigure hostSendConfigure = hostConfigureMap.get(self.getAddress());
-        InstanceState instance = selfInstanceMap.computeIfAbsent(selfRuntimeConfigure.lastAcceptSent + 1, InstanceState::new);
+
+        InstanceState instance;
+        if (!selfInstanceMap.containsKey(selfRuntimeConfigure.lastAcceptSent + 1)) {
+            instance=new InstanceState(selfRuntimeConfigure.lastAcceptSent + 1);
+            selfInstanceMap.put(selfRuntimeConfigure.lastAcceptSent + 1, instance);
+        }else {
+            instance=selfInstanceMap.get(selfRuntimeConfigure.lastAcceptSent + 1);
+        }
+        
+        
+        //InstanceState instance = selfInstanceMap.computeIfAbsent(selfRuntimeConfigure.lastAcceptSent + 1, InstanceState::new);
         //assert instance.acceptedValue == null && instance.highestAccept == null;
 
         //PaxosValue nextValue = val;
@@ -395,9 +405,9 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
             //}
             acceptRuntimeConfigure.highestAcknowledgedInstance++;
         }
+        
+        
 
-        //显示现在关于各项数据已经存储完毕标记
-        hostReceive.put(accpetNodeInetAddress,instance.iN);
     }
 
 
@@ -515,6 +525,9 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         //        logger.debug("此节点是后链,现在向后链" + nextOkBack + "转发" + msg);
         //    }
         //}
+
+        //显示现在关于各项数据已经存储完毕标记
+        hostReceive.get(accpetNodeInetAddress).set(inst.iN);
     }
     
     

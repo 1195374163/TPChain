@@ -3,6 +3,7 @@ package TPOChain.utils;
 import java.net.InetAddress;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 // TPOChainProto和TPOChainData层共享的数据结构
 public interface ShareDistrubutedInstances {
@@ -13,5 +14,5 @@ public interface ShareDistrubutedInstances {
     Map<InetAddress,RuntimeConfigure>  hostConfigureMap=new HashMap<>();
     
     // 局部日志现在已经收到多少，是已经存放在局部日志表中
-    Map<InetAddress, Integer>   hostReceive=new HashMap<>();
+    Map<InetAddress, AtomicInteger>   hostReceive=new HashMap<>();
 }
