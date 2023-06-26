@@ -557,7 +557,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             Map<Integer, InstanceState>  ins=new HashMap<>();
             instances.put(temp,ins);
             
-            
             //接收到的
             hostReceive.put(temp,-1);
         }
@@ -1153,6 +1152,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             sendNextAcceptCL(new SortValue(msg.node,msg.iN));
         }else {//对消息进行转发,转发到leader
             sendOrEnqueue(msg,supportedLeader());
+            logger.warn("not leader but receive OrderMSg msg");
         }
     }
     
@@ -1167,6 +1167,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             sendNextAcceptCL(new SortValue(msg.node,msg.iN));
         }else {//对消息进行转发,转发到leader
             sendOrEnqueue(msg,supportedLeader());
+            logger.warn("not leader but receive SubmitOrderMsg ipc");
         }
     }
     
@@ -1213,16 +1214,25 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     }
     
     private void uponAcceptCLMsg(AcceptCLMsg msg, Host from, short sourceProto, int channel) {
+        //if (logger.isDebugEnabled()){
+        //    logger.debug("收到"+from+"的:"+msg);
+        //}
         //无效信息：对不在系统中的节点发送未定义消息让其重新加入系统
         if(!membership.contains(from)){
             logger.warn("Received msg from unaffiliated host " + from);
             sendMessage(new UnaffiliatedMsg(), from, TCPChannel.CONNECTION_IN);
             return;
         }
-        //if (logger.isDebugEnabled()){
-        //    logger.debug("收到"+from+"的:"+msg);
-        //}
-        InstanceStateCL instance = globalinstances.computeIfAbsent(msg.iN, InstanceStateCL::new);
+        
+        // FIXME: 2023/6/26  这里访问的同时，不能对globalinstances修改，不然会触发并发修改异常
+        //InstanceStateCL instance = globalinstances.computeIfAbsent(msg.iN, InstanceStateCL::new);
+        InstanceStateCL instance;
+        if (!globalinstances.containsKey(msg.iN)) {
+            instance=new InstanceStateCL(msg.iN);
+            globalinstances.put(msg.iN, instance);
+        }else {
+            instance=globalinstances.get(msg.iN);
+        }
         
         
         //"Discarding decided msg"  重复而且消息已经决定了
@@ -1230,7 +1240,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             logger.warn("Discarding decided msg");
             return;
         }
-        
         
         // 消息的term小于当前的term
         if (msg.sN.lesserThan(currentSN.getValue())) {
@@ -1245,12 +1254,12 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             return;
         }
         // 重发消息的话,term 会大于当前实例的
-        
-        
+
+        // TODO: 2023/6/26 因为leader选举成功会向所有节点发送选举成功消息，所以这个不需要了 
         //设置msg.sN.getNode()为新支持的leader
-        if (msg.sN.greaterThan(currentSN.getValue())){
-            setNewInstanceLeader(msg.iN, msg.sN);
-        }
+        //if (msg.sN.greaterThan(currentSN.getValue())){
+        //    setNewInstanceLeader(msg.iN, msg.sN);
+        //}
 
         
         //其实在这里可以设置前链是否可以处理客户端消息
@@ -1526,11 +1535,12 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      * 转发accept信息给下一个节点
      * */
     private void forwardCL(InstanceStateCL inst) {
+        // FIXME: 2023/6/26 因为foward是uponAcceptCLMsg()方法调用，所以，下面的条件判断已经满足了
         // some cases no longer happen (like leader being removed)
-        if (!membership.contains(inst.highestAccept.getNode())) {
-            logger.error("Received accept from removed node (?)");
-            throw new AssertionError("Received accept from removed node (?)");
-        }
+        //if (!membership.contains(inst.highestAccept.getNode())) {
+        //    logger.error("Received accept from removed node (?)");
+        //    throw new AssertionError("Received accept from removed node (?)");
+        //}
         
         // 这里需要修改  不能使用满足F+1 ，才能发往下一个节点，
         //  若一个节点故障，永远不会满足F+1,应该使用逻辑链前链是否走完
@@ -1600,6 +1610,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //if (logger.isDebugEnabled()){
         //    logger.debug("Decided: " + instance.iN + " - " + instance.acceptedValue);
         //}
+        // FIXME: 2023/6/26 如果加入执行线程那么，上面的decide++ 应该放在执行之后
         //Actually execute message
         if (instance.acceptedValue.type == PaxosValue.Type.SORT) {
             if (state == TPOChainProto.State.ACTIVE){
@@ -1624,7 +1635,53 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             execute();
         }
     }
-    
+
+    /**
+     * 执行成员Removed OR  addMember操作
+     * */
+    private void executeMembershipOp(InstanceStateCL instance) {
+        MembershipOp o = (MembershipOp) instance.acceptedValue;
+        Host target = o.affectedHost;
+        if (o.opType == MembershipOp.OpType.REMOVE) {
+            logger.info("Removed from membership: " + target + " in inst " + instance.iN);
+            membership.removeMember(target);
+            triggerMembershipChangeNotification();
+            closeConnection(target);
+        } else if (o.opType == MembershipOp.OpType.ADD) {
+            logger.info("Added to membership: " + target + " in inst " + instance.iN);
+            membership.addMember(target);
+            triggerMembershipChangeNotification();
+            //对next  重新赋值
+            nextOkFront=membership.nextLivingInFrontedChain(self);
+            nextOkBack=membership.nextLivingInBackChain(self);
+
+            openConnection(target);
+
+            if (!hostConfigureMap.containsKey(target)){
+                //添加成功后，需要添加一新加节点的局部日志表 和  局部配置表
+                RuntimeConfigure runtimeConfigure=new RuntimeConfigure();
+                hostConfigureMap.put(target.getAddress(),runtimeConfigure);
+            }
+
+            if (!instances.containsKey(target)){
+                //局部日志进行初始化 
+                //Map<Host,Map<Integer, InstanceState>> instances 
+                ConcurrentMap<Integer, InstanceState>  ins=new ConcurrentHashMap<>();
+                instances.put(target.getAddress(),ins);
+            }
+
+
+            if (state == TPOChainProto.State.ACTIVE) {
+                //运行到这个方法说明已经满足大多数了
+                sendMessage(new JoinSuccessMsg(instance.iN, instance.highestAccept, membership.shallowCopy()), target);
+                assert highestDecidedInstanceCl == instance.iN;
+                //TODO need mechanism for joining node to inform nodes they can forget stored state
+                pendingSnapshots.put(target, MutablePair.of(instance.iN, instance.counter == QUORUM_SIZE));
+                sendRequest(new GetSnapshotRequest(target, instance.iN), TPOChainFront.PROTOCOL_ID_BASE);
+            }
+        }
+    }
+
     //Notice 读是ack时执行而不是decide时执行
     // FIXME: 2023/5/22 读应该是在附加的日志项被执行前执行，而不是之后或ack时执行
     /**
@@ -1637,17 +1694,17 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         }
 
         //处理重复消息或过时
-        if (instanceN<=highestAcknowledgedInstanceCl){
-            logger.info("Discarding 重复 acceptackclmsg"+instanceN+"当前highestAcknowledgedInstanceCl是"+highestAcknowledgedInstanceCl);
-            return;
-        }
+        //if (instanceN<=highestAcknowledgedInstanceCl){
+        //    logger.info("Discarding 重复 acceptackclmsg"+instanceN+"当前highestAcknowledgedInstanceCl是"+highestAcknowledgedInstanceCl);
+        //    return;
+        //}
 
         //For nodes in the first half of the chain only
         for (int i = highestDecidedInstanceCl + 1; i <= instanceN; i++) {
             InstanceStateCL ins = globalinstances.get(i);
-            assert !ins.isDecided();
+            //assert !ins.isDecided();
             decideAndExecuteCL(ins);
-            assert highestDecidedInstanceCl == i;
+            //assert highestDecidedInstanceCl == i;
         }
         
         // 进行ack信息的更新
@@ -1698,53 +1755,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //    lastAcceptTimeCl = 0; //Force sending a NO-OP (with the ack)
     }
     
-    
-    /**
-     * 执行成员Removed OR  addMember操作
-     * */
-    private void executeMembershipOp(InstanceStateCL instance) {
-        MembershipOp o = (MembershipOp) instance.acceptedValue;
-        Host target = o.affectedHost;
-        if (o.opType == MembershipOp.OpType.REMOVE) {
-            logger.info("Removed from membership: " + target + " in inst " + instance.iN);
-            membership.removeMember(target);
-            triggerMembershipChangeNotification();
-            closeConnection(target);
-        } else if (o.opType == MembershipOp.OpType.ADD) {
-            logger.info("Added to membership: " + target + " in inst " + instance.iN);
-            membership.addMember(target);
-            triggerMembershipChangeNotification();
-            //对next  重新赋值
-            nextOkFront=membership.nextLivingInFrontedChain(self);
-            nextOkBack=membership.nextLivingInBackChain(self);
-            
-            openConnection(target);
-            
-            if (!hostConfigureMap.containsKey(target)){
-                //添加成功后，需要添加一新加节点的局部日志表 和  局部配置表
-                RuntimeConfigure runtimeConfigure=new RuntimeConfigure();
-                hostConfigureMap.put(target.getAddress(),runtimeConfigure);  
-            }
 
-            if (!instances.containsKey(target)){
-                //局部日志进行初始化 
-                //Map<Host,Map<Integer, InstanceState>> instances 
-                ConcurrentMap<Integer, InstanceState>  ins=new ConcurrentHashMap<>();
-                instances.put(target.getAddress(),ins);
-            }
-
-            
-            if (state == TPOChainProto.State.ACTIVE) {
-                //运行到这个方法说明已经满足大多数了
-                sendMessage(new JoinSuccessMsg(instance.iN, instance.highestAccept, membership.shallowCopy()), target);
-                assert highestDecidedInstanceCl == instance.iN;
-                //TODO need mechanism for joining node to inform nodes they can forget stored state
-                pendingSnapshots.put(target, MutablePair.of(instance.iN, instance.counter == QUORUM_SIZE));
-                sendRequest(new GetSnapshotRequest(target, instance.iN), TPOChainFront.PROTOCOL_ID_BASE);
-            }
-        }
-    }
-    
     //TODO 一个命令可以回复客户端，只有在它以及它之前所有实例被ack时，才能回复客户端
     // 这是分布式系统的要求，因为原程序已经隐含了这个条件，通过判断出队列结构，FIFO，保证一个batch执行了，那么
     // 它之前的batch也执行了
