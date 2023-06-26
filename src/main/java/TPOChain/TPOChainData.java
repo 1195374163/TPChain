@@ -396,9 +396,8 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
             acceptRuntimeConfigure.highestAcknowledgedInstance++;
         }
 
-
         //显示现在关于各项数据已经存储完毕标记
-        hostReceive.put(selfInetAddress,instance.iN);
+        hostReceive.put(accpetNodeInetAddress,instance.iN);
     }
 
 
@@ -697,7 +696,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     }
     
     protected  void onFrontChainNotification(FrontChainNotification notification,short emitterID){
-        logger.info("接收来的通知是"+notification.getFrontChain()+notification.getBackchain());
+        //logger.info("接收来的通知是"+notification.getFrontChain()+notification.getBackchain());
         frontChain=notification.getFrontChain();
         membership.clear();
         int size=frontChain.size();
@@ -709,7 +708,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
                 break;
             }
         }
-        logger.info("输出前链"+membership);
+        //logger.info("输出前链"+membership);
         
         //判断若前链中包括自己，那么设置一个标记
         if (membership.contains(self)){
@@ -730,7 +729,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         for (InetAddress tmp:backChain) {
             membership.add(new Host(tmp,data_port));
         }
-        logger.info("输出总链"+membership);
+        //logger.info("输出总链"+membership);
         
         
         int memsize=membership.size();

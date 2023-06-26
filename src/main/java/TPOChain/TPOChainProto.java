@@ -575,7 +575,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             backChain.add(tmpbackChain.get(i).getAddress());
         }
 
-        logger.info("传递前链后链备份");
+        //logger.info("传递前链后链备份");
         // 往data层传输前链和后链
         triggerFrontChainChange();
        
@@ -799,13 +799,16 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             triggerNotification(new MembershipChange(
                     membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
                     null, host.getAddress(), null,-1));
-            logger.info("当前节点是后链"+self.toString()+"挂载在"+host.toString());
+            if (logger.isDebugEnabled())
+                logger.debug("当前节点是后链"+self.toString()+"挂载在"+host.toString());
         }else{// 自己就是前链节点
             triggerNotification(new MembershipChange(
                     membership.getMembers().stream().map(Host::getAddress).collect(Collectors.toList()),
                     null, self.getAddress(), null,membership.frontIndexOf(self)));
             //triggerIndexChange();
-            logger.info("当前节点是前链"+self.toString());
+            if (logger.isDebugEnabled()){
+                logger.info("当前节点是前链"+self.toString());
+            }
         }
     }
 
@@ -1771,11 +1774,13 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     // 从execute到ack的开始执行
     
     private void execLoop() {
+        logger.info("已经进入执行状态");
         while(true){
-            if (highestDecidedInstanceCl==0){
+            if (highestDecidedInstanceCl>=0){
                 break;
             }
         }
+        logger.info("已经跳出初始状态");
         //先跳出初始状态
         InstanceStateCL  globalInstanceTemp;
         InetAddress tempInetAddress;
@@ -1800,9 +1805,9 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                             break;
                         }
                     }
+                    logger.info("执行的是"+tempInetAddress+"的"+iNtarget+"实例");
                     tagetMap=instances.get(tempInetAddress);
                     ins= tagetMap.get(iNtarget);
-                    //如果分发消息不为空就可以执行
                     triggerNotification(new ExecuteBatchNotification(((AppOpBatch) ins.acceptedValue).getBatch()));
                     highestExecuteInstanceCl++;
                 }
@@ -1811,11 +1816,16 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     }
     
     private void gcLoop(){
+        logger.info("进入GC初始状态");
+        int highestAcknowledgedInstanceClback;
         while(true){
-            if (highestAcknowledgedInstanceCl==0) {
+            highestAcknowledgedInstanceClback=highestAcknowledgedInstanceCl;
+            if (highestAcknowledgedInstanceClback>=0) {
                 break;
             }
-        }//跳出初始状态
+        }
+        logger.info("跳出初始状态");
+        
         // TODO: 2023/6/26 注意gc收集尽量避开几大常数标记的实例，尽量小于它们，不得等于它们 
         InstanceStateCL  globalInstanceTemp;
         InetAddress tempInetAddress;
