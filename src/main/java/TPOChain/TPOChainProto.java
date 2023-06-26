@@ -1774,20 +1774,20 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     // 从execute到ack的开始执行
     
     private void execLoop() {
-        logger.info("已经进入执行状态");
+        logger.info("已经进入execLoop初始状态");
         while(true){
             if (highestDecidedInstanceCl>=0){
                 break;
             }
         }
-        logger.info("已经跳出初始状态");
-        //先跳出初始状态
+        logger.info("已经跳出execLoop初始状态");
         InstanceStateCL  globalInstanceTemp;
         InetAddress tempInetAddress;
         Map<Integer, InstanceState> tagetMap;
         InstanceState ins;
         while(true){
             int backuphighestDecidedInstanceCl=highestDecidedInstanceCl;
+            // TODO: 2023/6/26   i是<  还是  <=  影响不大 
             for (int i=highestExecuteInstanceCl+1;i<= backuphighestDecidedInstanceCl;i++){
                 globalInstanceTemp=globalinstances.get(i);
                 if (globalInstanceTemp.acceptedValue.type!= PaxosValue.Type.SORT){
@@ -1800,11 +1800,13 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                     SortValue sortTarget= (SortValue)globalInstanceTemp.acceptedValue;
                     tempInetAddress=sortTarget.getNode().getAddress();
                     int  iNtarget=sortTarget.getiN();
+                    logger.info("因为对应实例为空，处于等待");
                     while (true){
-                        if (hostReceive.get(tempInetAddress)>=iNtarget){
+                        if (hostReceive.get(tempInetAddress)>iNtarget){
                             break;
                         }
                     }
+                    logger.info("实例存在，不在等待");
                     logger.info("执行的是"+tempInetAddress+"的"+iNtarget+"实例");
                     tagetMap=instances.get(tempInetAddress);
                     ins= tagetMap.get(iNtarget);
@@ -1815,6 +1817,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         }
     }
     
+    
     private void gcLoop(){
         logger.info("进入GC初始状态");
         int highestAcknowledgedInstanceClback;
@@ -1824,35 +1827,36 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                 break;
             }
         }
-        logger.info("跳出初始状态");
-        
+        logger.info("跳出GC初始状态");
         // TODO: 2023/6/26 注意gc收集尽量避开几大常数标记的实例，尽量小于它们，不得等于它们 
         InstanceStateCL  globalInstanceTemp;
         InetAddress tempInetAddress;
         int iNtarget;
         while(true){
-            int  backhighestExecuteInstanceCl=highestExecuteInstanceCl-1;
-            int backhighestAcknowledgedInstanceCl=highestAcknowledgedInstanceCl-1;
-            if (highestGarbageCollectionCl< backhighestExecuteInstanceCl &&
-            highestGarbageCollectionCl < backhighestAcknowledgedInstanceCl){
-                // 删除全局日志对应日志项  触发读
-                globalInstanceTemp=globalinstances.remove(highestGarbageCollectionCl+1);
-                globalInstanceTemp.getAttachedReads().forEach((k, v) -> sendReply(new ExecuteReadReply(v,highestGarbageCollectionCl+1), k));
-
-                
-                if (globalInstanceTemp.acceptedValue.type == PaxosValue.Type.SORT){
-                    SortValue sortTarget= (SortValue)globalInstanceTemp.acceptedValue;
-                    tempInetAddress=sortTarget.getNode().getAddress();
-                    iNtarget=sortTarget.getiN();
-                   instances.get(tempInetAddress).remove(iNtarget);
-                }else {//是noop消息 成员管理消息
+            while(true){
+                int backhighestExecuteInstanceCl     =highestExecuteInstanceCl;
+                int backhighestAcknowledgedInstanceCl=highestAcknowledgedInstanceCl;
+                if (highestGarbageCollectionCl< backhighestExecuteInstanceCl && highestGarbageCollectionCl < backhighestAcknowledgedInstanceCl){
+                    break;
                 }
-                highestGarbageCollectionCl++;
-            }else {
-                continue;
             }
+            // 删除全局日志对应日志项  触发读
+            globalInstanceTemp=globalinstances.remove(highestGarbageCollectionCl+1);
+            globalInstanceTemp.getAttachedReads().forEach((k, v) -> sendReply(new ExecuteReadReply(v,highestGarbageCollectionCl+1), k));
+            if (globalInstanceTemp.acceptedValue.type == PaxosValue.Type.SORT){
+                SortValue sortTarget= (SortValue)globalInstanceTemp.acceptedValue;
+                tempInetAddress=sortTarget.getNode().getAddress();
+                iNtarget=sortTarget.getiN();
+               instances.get(tempInetAddress).remove(iNtarget);
+            }else {//是noop消息 成员管理消息
+                //nothing
+            }
+            highestGarbageCollectionCl++;
         }
     }
+    
+    
+    
     
     
     
