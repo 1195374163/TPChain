@@ -15,10 +15,10 @@ public class AcceptAckMsg extends ProtoMessage {
     public final int instanceNumber;
     
     
-    public AcceptAckMsg(Host node,short threadid,int instanceNumber) {
+    public AcceptAckMsg(Host node,int instanceNumber) {
         super(MSG_CODE);
         this.node=node;
-        this.threadid=threadid;//这里继承了父类的变量
+        //this.threadid=threadid;//这里继承了父类的变量
         this.instanceNumber = instanceNumber;
     }
 
@@ -26,7 +26,7 @@ public class AcceptAckMsg extends ProtoMessage {
     public String toString() {
         return "AcceptAckMsg{" +
                 "node="+ node +
-                "threadid="+ threadid +
+                //"threadid="+ threadid +
                 "instanceNumber=" + instanceNumber +
                 '}';
     }
@@ -35,15 +35,16 @@ public class AcceptAckMsg extends ProtoMessage {
     public static ISerializer<? extends ProtoMessage> serializer = new ISerializer<AcceptAckMsg>() {
         public void serialize(AcceptAckMsg msg, ByteBuf out) throws IOException {
             Host.serializer.serialize(msg.node,out);
-            out.writeShort(msg.threadid);
+            //out.writeShort(msg.threadid);
             out.writeInt(msg.instanceNumber);
         }
 
         public AcceptAckMsg deserialize(ByteBuf in) throws IOException {
             Host node=Host.serializer.deserialize(in);
-            short threadid=in.readShort();
+            //short threadid=in.readShort();
             int instanceNumber = in.readInt();
-            return new AcceptAckMsg(node,threadid,instanceNumber);
+           //return new AcceptAckMsg(node,threadid,instanceNumber);
+            return new AcceptAckMsg(node,instanceNumber);
         }
     };
 }

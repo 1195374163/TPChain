@@ -7,6 +7,7 @@ import java.net.InetAddress;
 import java.util.List;
 
 public class FrontChainNotification  extends ProtoNotification {
+    
     public static final short NOTIFICATION_ID = 204;
     List<InetAddress>  frontChain;
     List<InetAddress>  backchain;

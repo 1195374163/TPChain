@@ -60,6 +60,8 @@ public class HashMapApp implements Application {
     private final ConcurrentMap<Integer, Pair<Integer, Channel>> opMapper;
     private final AtomicInteger idCounter;
     private final List<FrontendProto> frontendProtos;
+    
+    private  List<TPOChainData> dataProtos;
     private int nWrites,nReads;
     private ConcurrentMap<String, byte[]> store;
 
@@ -73,15 +75,18 @@ public class HashMapApp implements Application {
         Babel babel = Babel.getInstance();
         EventLoopGroup consensusWorkerGroup     = NetworkManager.createNewWorkerGroup();
         EventLoopGroup consensusdataWorkerGroup = NetworkManager.createNewWorkerGroup();
-        EventLoopGroup consensusdataWorkerGroup2 = NetworkManager.createNewWorkerGroup();
+        //EventLoopGroup consensusdataWorkerGroup2 = NetworkManager.createNewWorkerGroup();
         String alg = configProps.getProperty("algorithm");
         int nFrontends = Short.parseShort(configProps.getProperty("n_frontends"));
+        int nDatas = Short.parseShort(configProps.getProperty("n_datas"));
         frontendProtos = new LinkedList<>();//frontendProtos是List<FrontendProto> frontendProtos;
+        dataProtos=new LinkedList<>();
         GenericProtocol consensusProto;
-        GenericProtocol consensusdata = null;
-        GenericProtocol consensusdata2=null;
-        //int availableProcessors = Runtime.getRuntime().availableProcessors();
-        //logger.info("Available Processors: " + availableProcessors);
+        //GenericProtocol consensusdata = null;
+        //GenericProtocol consensusdata2=null;
+        
+        int availableProcessors = Runtime.getRuntime().availableProcessors();
+        logger.info("Available Processors: " + availableProcessors);
         
         switch (alg) {
             case "chain_mixed":
@@ -149,16 +154,14 @@ public class HashMapApp implements Application {
                     frontendProtos.add(new RingPaxosFront(configProps, i, this));
                 consensusProto = new RingPaxosPiggyProto(configProps, consensusWorkerGroup);
                 break;
-            //case "improchain_delayed":
-            //    for (short i = 0; i < nFrontends; i++)
-            //        frontendProtos.add(new ImproChainPaxosDelayedFront(configProps, i, this));
-            //    consensusProto = new ImproChainPaxosDelayedProto(configProps, consensusWorkerGroup);
-            //    break;
             case "TPOChain":
                 for (short i = 0; i < nFrontends; i++)
                     frontendProtos.add(new TPOChainFront(configProps, i, this));
-                consensusdata  =new  TPOChainData(configProps,(short)0,consensusdataWorkerGroup);
-                consensusdata2  =new TPOChainData(configProps,(short)1,consensusdataWorkerGroup2);
+                for (short i=0;i<nDatas;i++) {
+                    dataProtos.add(new TPOChainData(configProps,i,consensusdataWorkerGroup));
+                }
+                //consensusdata  =new  TPOChainData(configProps,(short)0,consensusdataWorkerGroup);
+                //consensusdata2  =new TPOChainData(configProps,(short)1,consensusdataWorkerGroup2);
                 consensusProto = new TPOChainProto(configProps, consensusWorkerGroup);
                 break;
             default:
@@ -169,20 +172,27 @@ public class HashMapApp implements Application {
 
         for (FrontendProto frontendProto : frontendProtos)
             babel.registerProtocol(frontendProto);
-        if (consensusdata!=null){
-            babel.registerProtocol(consensusdata);
-            babel.registerProtocol(consensusdata2);
+        for (TPOChainData  dataproto:dataProtos){
+            babel.registerProtocol(dataproto);
         }
+        //if (consensusdata!=null){
+        //    babel.registerProtocol(consensusdata);
+        //    babel.registerProtocol(consensusdata2);
+        //}
         babel.registerProtocol(consensusProto);
 
-        
+      
         for (FrontendProto frontendProto : frontendProtos)
             frontendProto.init(configProps);
-        if (consensusdata!=null){
-            consensusdata.init(configProps);
-            consensusdata2.init(configProps);
+        for (TPOChainData  dataproto:dataProtos){
+            dataproto.init(configProps);
         }
         consensusProto.init(configProps);
+        //if (consensusdata!=null){
+        //    consensusdata.init(configProps);
+        //    consensusdata2.init(configProps);
+        //}
+     
         
         
         //线程开
@@ -360,7 +370,7 @@ public class HashMapApp implements Application {
         @Override
         public void channelActive(ChannelHandlerContext ctx) throws Exception {
             //logger.debug("Client connected: " + ctx.channel().remoteAddress());
-            logger.info("Client connected: " + ctx.channel().remoteAddress());
+            //logger.info("Client connected: " + ctx.channel().remoteAddress());
             ctx.fireChannelActive();
         }
 

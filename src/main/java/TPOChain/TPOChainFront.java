@@ -373,7 +373,7 @@ public class TPOChainFront extends FrontendProto {
      * logger.info("New writesTo: " + writesTo.getAddress());
      * */
     protected void onMembershipChange(MembershipChange notification, short emitterId) {
-        
+        this.index=notification.getIndex();
      
         //update membership and responder
         membership = notification.getOrderedMembers();
@@ -387,7 +387,7 @@ public class TPOChainFront extends FrontendProto {
             }
             //Update and open to new writesTo
             writesTo = new Host(notification.getWritesTo(), PEER_PORT);
-            logger.info("New writesTo: " + writesTo.getAddress());
+            logger.info("New mount: " + writesTo.getAddress());
             if (!writesTo.getAddress().equals(self))
                 openConnection(writesTo, peerChannel);
         }
@@ -395,7 +395,7 @@ public class TPOChainFront extends FrontendProto {
     
     
     /**
-     * 发送请求改变选择哪个通道
+     * 发送请求改变选择哪个Data通道
      * */
     protected void onFrontIndexNotificationChange(FrontIndexNotification notification,short emitterID){
         this.index=notification.getIndex();
