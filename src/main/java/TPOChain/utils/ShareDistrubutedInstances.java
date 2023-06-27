@@ -1,8 +1,12 @@
 package TPOChain.utils;
 
+import epaxos.utils.Instance;
+import pt.unl.fct.di.novasys.babel.internal.InternalEvent;
+
 import java.net.InetAddress;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 
 // TPOChainProto和TPOChainData层共享的数据结构
@@ -13,6 +17,6 @@ public interface ShareDistrubutedInstances {
     // 局部日志的配置表
     Map<InetAddress,RuntimeConfigure>  hostConfigureMap=new HashMap<>();
     
-    // 局部日志现在已经收到多少，是已经存放在局部日志表中
-    Map<InetAddress, AtomicInteger>   hostReceive=new HashMap<>();
+    //每一个Data通道都有着自己的消息队列
+    Map<InetAddress, BlockingQueue<InstanceState>>  hostMessageQueue=new HashMap<>();
 }

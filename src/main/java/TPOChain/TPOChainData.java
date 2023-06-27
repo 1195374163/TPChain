@@ -22,8 +22,9 @@ import org.apache.logging.log4j.Logger;
 import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
 import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
 import pt.unl.fct.di.novasys.babel.generic.ProtoMessage;
-import pt.unl.fct.di.novasys.babel.internal.BabelMessage;
-import pt.unl.fct.di.novasys.babel.internal.MessageInEvent;
+import pt.unl.fct.di.novasys.babel.generic.ProtoReply;
+import pt.unl.fct.di.novasys.babel.generic.ProtoRequest;
+import pt.unl.fct.di.novasys.babel.internal.*;
 import pt.unl.fct.di.novasys.channel.tcp.TCPChannel;
 import pt.unl.fct.di.novasys.channel.tcp.events.*;
 import pt.unl.fct.di.novasys.network.data.Host;
@@ -32,6 +33,8 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
 import java.util.*;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
 
 public class TPOChainData extends GenericProtocol  implements ShareDistrubutedInstances {
 
@@ -61,10 +64,6 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     private final int RECONNECT_TIME;
     
     private final int QUORUM_SIZE;
-
-
-
-
     
     
     //private Host nextOkFront;
@@ -148,6 +147,20 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
      * 标记是否为前段节点，代表者可以发送command，并向leader发送排序
      */
     private boolean amFrontedNode;
+
+
+
+
+    // GC线程使用 ------older
+    private BlockingQueue<Integer> oldackqueue    = new LinkedBlockingQueue<Integer>();
+    private int  lastsendack=-1;// 每一百进行一次
+    private BlockingQueue<Integer> oldexecutequeue= new LinkedBlockingQueue<Integer>();
+    private int  lastsendexecute=-1; //每一百
+
+    // gc线程
+    private  Thread gcThread;
+    
+    
     
     
     
@@ -213,7 +226,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         this.NOOP_SEND_INTERVAL = Integer.parseInt(props.getProperty(NOOP_INTERVAL_KEY));
         this.QUORUM_SIZE = Integer.parseInt(props.getProperty(QUORUM_SIZE_KEY));
 
-
+        this.gcThread= new Thread(this::gcLoop, (PROTOCOL_NAME+index) + "-" + (short)(PROTOCOL_ID+index)+"---gc");
     }
 
     public void init(Properties props) throws HandlerRegistrationException, IOException {
@@ -262,8 +275,48 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         
         
         logger.info("TPOChaindata"+index+"开启: ");
-    }
 
+        gcThread.start();
+    }
+    
+    
+    //gc线程
+    private void gcLoop() {
+        // 应该负责清除本通道的数据分发
+        int receiveack;
+        int  receiveexecute;
+        while (true) {
+            while(true){
+                try {
+                    receiveack=oldackqueue.take();
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+                if (acceptRuntimeConfigure.highestGCInstance<receiveack){
+                    break;
+                }
+            }
+            while(true){
+                try {
+                    receiveexecute=acceptRuntimeConfigure.executeFlagQueue.take();
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+                if (acceptRuntimeConfigure.highestGCInstance<receiveexecute){
+                    break;
+                }
+            }
+            int min=Math.min(receiveack,receiveexecute);
+            
+            for (int i=acceptRuntimeConfigure.highestGCInstance+1;i<min;i++)
+            if (acceptRuntimeConfigure.highestGCInstance< min){
+                acceptInstanceMap.remove(i);
+                acceptRuntimeConfigure.highestGCInstance++;
+            }else {
+              //todo
+            }
+        }
+    }
     
     
 
@@ -407,7 +460,8 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         }
         
         
-
+        //将instance添加到消息队列中:
+        hostMessageQueue.get(accpetNodeInetAddress).add(instance);
     }
 
 
@@ -527,7 +581,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         //}
 
         //显示现在关于各项数据已经存储完毕标记
-        hostReceive.get(accpetNodeInetAddress).set(inst.iN);
+        //hostReceive.get(accpetNodeInetAddress).set(inst.iN);
     }
     
     

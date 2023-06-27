@@ -1,5 +1,8 @@
 package TPOChain.utils;
 
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+
 //主要用来对节点执行前链节点的分发命令情况做标记，由节点自动管理
 //TODO  新加入的节点要保存一份这个，还要生成一份局部日志
 public class RuntimeConfigure {
@@ -27,11 +30,18 @@ public class RuntimeConfigure {
     
     public int highestDecidedInstance = -1;
     public int highestAcknowledgedInstance = -1;
-
-
+    public int highestExecutedInstance=-1;
+    // GC标记不一定紧贴着 ack或execute
+    public  int highestGCInstance=-1;
+    
+    // 由控制协议的执行线程赋值
+    public BlockingQueue<Integer>  executeFlagQueue= new LinkedBlockingQueue<>();
+    
     // TODO: 2023/5/23 用来向新加入节点转发各个commandleader节点的分发情况 
     //  主要后链链尾用来定时向命令的coommandleader发送ack信息
     //  节点在收到这个节点的分发消息的时间
     // TODO: 2023/5/29 在commandleader发送noop消息，启动一个时钟，到时停止计时并且对noop消息自动进行ack 
     public long lastAcceptTime=0;
+    
+    
 }
