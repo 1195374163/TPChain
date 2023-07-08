@@ -12,7 +12,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 // TPOChainProto和TPOChainData层共享的数据结构
 public interface ShareDistrubutedInstances {
     //局部日志
-    Map<InetAddress,Map<Integer, InstanceState>> instances = new HashMap<>(8000);
+    Map<InetAddress,Map<Integer, InstanceState>> instances = new HashMap<>(30000);
     
     // 局部日志的配置表
     Map<InetAddress,RuntimeConfigure>  hostConfigureMap=new HashMap<>();

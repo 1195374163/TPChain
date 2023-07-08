@@ -24,43 +24,59 @@ public abstract class FrontendProto extends GenericProtocol {
 
     public static final String ADDRESS_KEY = "frontend_address";
     public static final String PEER_PORT_KEY = "frontend_peer_port";
-    private static final Logger logger = LogManager.getLogger(FrontendProto.class);
     
+    private static final Logger logger = LogManager.getLogger(FrontendProto.class);
+
+    // 操作的两种枚举
+    public enum OpType {STRONG_READ, WRITE}
+    
+    // 使用的端口号
     protected final int PEER_PORT;
+    // 标识自身
     protected final InetAddress self;
+    // 对状态层的标识
     protected final Application app;
-    //下面着两个生成
+    
+    
+    
+    //下面两个参数拼接生成对操作的唯一标识
     private final int opPrefix;
     private int opCounter;
-    //第几个Fronted索引
-    private final short protoIndex;
     
+    
+    
+    //第几个Front索引
+    private final short protoIndex;
+    // TCP通道
     protected int peerChannel;
-
+    
+    
     //系统中节点列表动态的更新，从下层的protocol层接收，是protocol层的membership的备份
     protected List<InetAddress> membership;
 
-
-    /**
-    * 构造函数
-    * */
+    
+    //构造函数
     public FrontendProto(String protocolName, short protocolId, Properties props,
                          short protoIndex, Application app) throws IOException {
         super(protocolName, protocolId);
 
-        this.app = app;
-        this.PEER_PORT = Integer.parseInt(props.getProperty(PEER_PORT_KEY)) + protoIndex;
         self = InetAddress.getByName(props.getProperty(ADDRESS_KEY));
+        this.PEER_PORT = Integer.parseInt(props.getProperty(PEER_PORT_KEY)) + protoIndex;
+        
+        
         opPrefix = ByteBuffer.wrap(self.getAddress()).getInt();
         opCounter = 0;
+        
+        
+        this.app = app;
         membership = null;
         this.protoIndex = protoIndex;
     }
 
+    
     @SuppressWarnings("DuplicatedCode")
     @Override
     public void init(Properties props) throws HandlerRegistrationException, IOException {
-
         //Peer
         Properties peerProps = new Properties();
         peerProps.setProperty(TCPChannel.ADDRESS_KEY, props.getProperty(ADDRESS_KEY));
@@ -68,10 +84,12 @@ public abstract class FrontendProto extends GenericProtocol {
         //peerProps.put(TCPChannel.DEBUG_INTERVAL_KEY, 10000);
         peerChannel = createChannel(TCPChannel.NAME, peerProps);
 
+        
         registerMessageSerializer(peerChannel, PeerBatchMessage.MSG_CODE, PeerBatchMessage.serializer);
 
         registerMessageHandler(peerChannel, PeerBatchMessage.MSG_CODE, this::onPeerBatchMessage, this::uponMessageFailed);
 
+        
 
         registerChannelEventHandler(peerChannel, InConnectionDown.EVENT_ID, this::onInConnectionDown);
         registerChannelEventHandler(peerChannel, InConnectionUp.EVENT_ID, this::onInConnectionUp);
@@ -91,6 +109,7 @@ public abstract class FrontendProto extends GenericProtocol {
         _init(props);
     }
 
+    
     protected abstract void _init(Properties props) throws HandlerRegistrationException;
 
     
@@ -104,16 +123,16 @@ public abstract class FrontendProto extends GenericProtocol {
         return ((long) opCounter << 32) | (opPrefix & 0xFFFFFFFFL);
     }
 
-    /* ----------------------------------------------- ------------- ------------------------------------------ */
-    /* ----------------------------------------------- APP INTERFACE ------------------------------------------ */
-    /* ----------------------------------------------- ------------- ------------------------------------------ */
-
+    
+   
+    /* ------------------------ APP INTERFACE ----------------------- */
+   
     //TODO SYNCHRONIZE THIS FOR EVERY FRONTEND
     public abstract void submitOperation(byte[] op, OpType type);
-
-    /* ----------------------------------------------- ----------- ----------------------------------------------- */
-    /* ----------------------------------------------- PEER EVENTS ----------------------------------------------- */
-    /* ----------------------------------------------- ----------- ----------------------------------------------- */
+    
+    
+    
+    /* ----------------------- PEER EVENTS -------------- */
 
     /**
      * 处理PeerBatch消息事件
@@ -137,19 +156,17 @@ public abstract class FrontendProto extends GenericProtocol {
         logger.debug(event);
     }
 
-    /* ------------------------------------------- ------------- ------------------------------------------- */
-    /* ------------------------------------------- CONSENSUS OPS ------------------------------------------- */
-    /* ------------------------------------------- ------------- ------------------------------------------- */
-
     
-    /**
-     * 安装快照
-     * */
-    private void onInstallSnapshot(InstallSnapshotNotification not, short from) {
-        app.installState(not.getState());
+    public void uponMessageFailed(ProtoMessage msg, Host host, short i, Throwable throwable, int i1) {
+        logger.warn("Failed: " + msg + ", to: " + host + ", reason: " + throwable.getMessage());
     }
 
 
+  
+    
+    
+    /* ------------------------------------------- CONSENSUS OPS ------------------------------------------- */
+    
     /**
      * 由proto请求，fronted接收，然后答复发送到相应的协议Proto得到的快照
      * */
@@ -158,15 +175,20 @@ public abstract class FrontendProto extends GenericProtocol {
         sendReply(new DeliverSnapshotReply(not.getSnapshotTarget(),
                 not.getSnapshotInstance(), state), from);
     }
-
+    
+    /**
+     * 安装快照
+     * */
+    private void onInstallSnapshot(InstallSnapshotNotification not, short from) {
+        app.installState(not.getState());
+    }
+    
+    
+    
     protected abstract void onExecuteBatch(ExecuteBatchNotification reply, short from);
 
+    
+    
+    
     protected abstract void onMembershipChange(MembershipChange notification, short emitterId);
-
-    public void uponMessageFailed(ProtoMessage msg, Host host, short i, Throwable throwable, int i1) {
-        logger.warn("Failed: " + msg + ", to: " + host + ", reason: " + throwable.getMessage());
-    }
-
-    public enum OpType {STRONG_READ, WRITE}
-
 }

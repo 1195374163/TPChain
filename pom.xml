@@ -18,11 +18,24 @@
 <!--            <id>jitpack.io</id>-->
 <!--            <url>https://jitpack.io</url>-->
 <!--        </repository>-->
-        <repository>
-            <id>github-rich-repo</id>
-            <name>The Maven Repository on Github</name>
-            <url>https://github.com/1195374163/babel-core-plus/maven-repo/</url>
-        </repository>
+<!--        ipc不分离的babel-->
+<!--        <repository>-->
+<!--            <id>github-rich-repo</id>-->
+<!--            <name>The Maven Repository on Github</name>-->
+<!--            <url>https://github.com/1195374163/babel-core-plus/maven-repo/</url>-->
+<!--        </repository>-->
+<!--       ipc分离 -->
+<!--        <repository>-->
+<!--            <id>github-rich-repo</id>-->
+<!--            <name>The Maven Repository on Github</name>-->
+<!--            <url>https://github.com/1195374163/babel-ipc/maven-repo/</url>-->
+<!--        </repository>-->
+     
+                <repository>
+                    <id>github-rich-repo</id>
+                    <name>The Maven Repository on Github</name>
+                    <url>https://github.com/1195374163/tpchainbabel/maven-repo/</url>
+                </repository>
     </repositories>
 
     <dependencies>
@@ -32,13 +45,24 @@
         <!--            <artifactId>babel-core</artifactId>-->
         <!--            <version>0.4.46</version>-->
         <!--        </dependency>-->
-        <dependency>
-            <groupId>pt.unl.fct.di.novasys</groupId>
-            <artifactId>babel-core</artifactId>
-            <version>0.6.01</version>
-        </dependency>
-
+<!--        <dependency>-->
+<!--            <groupId>pt.unl.fct.di.novasys</groupId>-->
+<!--            <artifactId>babel-core</artifactId>-->
+<!--            <version>0.6.01</version>-->
+<!--        </dependency>-->
+<!--        <dependency>-->
+<!--            <groupId>pt.unl.fct.di.novasys</groupId>-->
+<!--            <artifactId>babel-core</artifactId>-->
+<!--            <version>0.7.0</version>-->
+<!--        </dependency>-->
+<!--        -->
         
+                <dependency>
+                    <groupId>pt.unl.fct.di.novasys</groupId>
+                    <artifactId>babel-core</artifactId>
+                    <version>0.8.0</version>
+                </dependency>
+                
         <dependency>
             <groupId>org.apache.zookeeper</groupId>
             <artifactId>zookeeper</artifactId>

@@ -416,7 +416,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         //}
 
         //如果消息是新生成的那么,它的投票数为0,肯定不满足下面这个条件，若是重发的则直接满足条件进行丢弃
-        if (msg.nodeCounter + 1 <= instance.counter) {
+        if (msg.nodeCounter +1  <= instance.counter) {
             logger.warn("Discarding 已经在局部表存在的acceptmsg");
             return;
         }
@@ -600,7 +600,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         RuntimeConfigure ackHostRuntimeConfigure = hostConfigureMap.get(ackHost.getAddress());
         
         if (msg.instanceNumber <= ackHostRuntimeConfigure.highestAcknowledgedInstance) {
-            logger.warn("Ignoring acceptAck for old instance: " + msg);
+            logger.warn("Ignoring acceptAck for old instance: " + msg+"from"+from);
             return;
         }
         // 执行ack程序

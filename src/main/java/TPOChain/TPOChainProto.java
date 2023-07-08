@@ -360,7 +360,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     private BlockingQueue<Integer> olddecidequeue= new LinkedBlockingQueue<>();
     //排序执行机构
     private Thread executionSortThread;
-    
+
+    private BlockingQueue<InstanceStateCL> olderInstanceClQueue= new LinkedBlockingQueue<>();
     
     
     //GC
@@ -567,11 +568,11 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //对全局的排序消息进行配置  -1
         joiningInstanceCl =highestAcceptedInstanceCl = instanceNumber;// instanceNumber初始为-1,但对于
         //对全局的排序消息进行配置  -1
-        
         highestGarbageCollectionCl=instanceNumber;
         highestExecuteInstanceCl=instanceNumber;
         highestAcknowledgedInstanceCl=instanceNumber;
         highestDecidedInstanceCl=instanceNumber;
+        
         
         //对命令分发进行初始化配置
         for (Host tempHost:members) {
@@ -581,13 +582,10 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             RuntimeConfigure runtimeConfigure=new RuntimeConfigure();
             hostConfigureMap.put(temp,runtimeConfigure);
 
-            //局部日志进行初始化 Map<Host,Map<Integer, InstanceState>> instances
-            Map<Integer, InstanceState>  ins=new HashMap<>();
+           
+            Map<Integer, InstanceState>  ins=new HashMap<>(30000);
             instances.put(temp,ins);
             
-            //接收到的
-            //hostReceive.put(temp,new AtomicInteger(-1));
-            // 对于message queue进行初始化
             
             BlockingQueue<InstanceState>  que=new LinkedBlockingQueue<>();
             hostMessageQueue.put(temp,que);
@@ -603,9 +601,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         for (int i=0;i<tmpbackChain.size();i++){
             backChain.add(tmpbackChain.get(i).getAddress());
         }
-
-        //logger.info("传递前链后链备份");
-        // 往data层传输前链和后链
+        
         triggerFrontChainChange();
        
         //当判断当前节点是否为前链节点
@@ -615,12 +611,12 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             }
             frontChainNodeAction();
         }else {
-           // triggerThreadidamFrontNextFrontNextBackChange();
+         
         }
 
         this.executionSortThread.start();
         this.executionGabageCollectionThread.start();
-        //gCTimeoutTimer=setupPeriodicTimer(GCTimer.instance, 3000, 3000);
+   
     }
     
     
@@ -1332,7 +1328,9 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         
         
         forwardCL(instance);//转发下一个节点
-        
+
+
+        olderInstanceClQueue.add(instance);
         
         // 为什么需要前者，因为新leader选举出来会重发一些消息，所以需要判断instance.isDecided()
         if (!instance.isDecided() && instance.counter >= QUORUM_SIZE) //We have quorum!
@@ -1650,27 +1648,14 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //Actually execute message
         if (instance.acceptedValue.type == PaxosValue.Type.SORT) {
             if (state == TPOChainProto.State.ACTIVE){
-                //synchronized (executeLock){
-                //    execute();
-                //}
-                //execute();
             } else  //在节点处于加入join之后，暂存存放的批处理命令
                 // TODO: 2023/6/1 这里不对，在加入节点时，不能执行这个 
                 bufferedOps.add((SortValue) instance.acceptedValue);
         } else if (instance.acceptedValue.type == PaxosValue.Type.MEMBERSHIP) {
             executeMembershipOp(instance);
-            //synchronized (executeLock){
-            //    execute();
-            //}
-            //execute();
         } else if (instance.acceptedValue.type == PaxosValue.Type.NO_OP) {
-            //nothing
-            //synchronized (executeLock){
-            //    execute();
-            //}
-            //execute();
+
         }
-        // FIXME: 2023/6/26 如果加入执行线程那么，上面的decide++ 应该放在执行之后
         instance.markDecided();
         highestDecidedInstanceCl++;
         olddecidequeue.add(highestDecidedInstanceCl);
@@ -1817,9 +1802,18 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
             }
-            
+            //logger.info("旧decide"+olddecide);
             for (int i=highestExecuteInstanceCl+1;i<=olddecide;i++){
-                InstanceStateCL instanceCLtemp=globalinstances.get(i);
+                //logger.info("执行值"+highestExecuteInstanceCl);
+                //logger.info("i是"+i);
+                InstanceStateCL instanceCLtemp;
+                try {
+                    instanceCLtemp=olderInstanceClQueue.take();
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+                //logger.info("从全局队列中的值"+instanceCLtemp.iN);
+                //InstanceStateCL instanceCLtemp=globalinstances.get(i);
                 if (instanceCLtemp.acceptedValue.type!= PaxosValue.Type.SORT){
                     // 那消息可能是成员管理消息  也可能是noop消息
                     highestExecuteInstanceCl++;
@@ -2776,7 +2770,15 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      * */
     public void onSubmitRead(SubmitReadRequest not, short from) {
         int readInstance = highestAcceptedInstanceCl + 1;
-        globalinstances.computeIfAbsent(readInstance, InstanceStateCL::new).attachRead(not);
+        //globalinstances.computeIfAbsent(readInstance, InstanceStateCL::new).attachRead(not);
+        InstanceStateCL instance;
+        if (!globalinstances.containsKey(readInstance)) {
+            instance=new InstanceStateCL(readInstance);
+            globalinstances.put(readInstance, instance);
+            instance.attachRead(not);
+        }else {
+            globalinstances.get(readInstance).attachRead(not);
+        }
     }
 
 

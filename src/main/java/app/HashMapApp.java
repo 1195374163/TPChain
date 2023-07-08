@@ -57,13 +57,19 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class HashMapApp implements Application {
 
     private static final Logger logger = LogManager.getLogger(HashMapApp.class);
-    private final ConcurrentMap<Integer, Pair<Integer, Channel>> opMapper;
+    // 暂存读写客户端来的通道和标识
     private final AtomicInteger idCounter;
-    private final List<FrontendProto> frontendProtos;
+    private final ConcurrentMap<Integer, Pair<Integer, Channel>> opMapper;
     
+    //前端层
+    private final List<FrontendProto> frontendProtos;
+    //数据通道层
     private  List<TPOChainData> dataProtos;
+    
+    //状态层
     private int nWrites,nReads;
     private ConcurrentMap<String, byte[]> store;
+    
 
     public HashMapApp(Properties configProps) throws IOException, ProtocolAlreadyExistsException,
             HandlerRegistrationException, InterruptedException {
@@ -75,12 +81,13 @@ public class HashMapApp implements Application {
         Babel babel = Babel.getInstance();
         EventLoopGroup consensusWorkerGroup     = NetworkManager.createNewWorkerGroup();
         EventLoopGroup consensusdataWorkerGroup = NetworkManager.createNewWorkerGroup();
-        //EventLoopGroup consensusdataWorkerGroup2 = NetworkManager.createNewWorkerGroup();
+        
+        
         String alg = configProps.getProperty("algorithm");
         int nFrontends = Short.parseShort(configProps.getProperty("n_frontends"));
         int nDatas = Short.parseShort(configProps.getProperty("n_datas"));
         frontendProtos = new LinkedList<>();//frontendProtos是List<FrontendProto> frontendProtos;
-        dataProtos=new LinkedList<>();
+        dataProtos     =new LinkedList<>();
         GenericProtocol consensusProto;
         //GenericProtocol consensusdata = null;
         //GenericProtocol consensusdata2=null;
@@ -160,8 +167,6 @@ public class HashMapApp implements Application {
                 for (short i=0;i<nDatas;i++) {
                     dataProtos.add(new TPOChainData(configProps,i,consensusdataWorkerGroup));
                 }
-                //consensusdata  =new  TPOChainData(configProps,(short)0,consensusdataWorkerGroup);
-                //consensusdata2  =new TPOChainData(configProps,(short)1,consensusdataWorkerGroup2);
                 consensusProto = new TPOChainProto(configProps, consensusWorkerGroup);
                 break;
             default:
@@ -175,29 +180,24 @@ public class HashMapApp implements Application {
         for (TPOChainData  dataproto:dataProtos){
             babel.registerProtocol(dataproto);
         }
-        //if (consensusdata!=null){
-        //    babel.registerProtocol(consensusdata);
-        //    babel.registerProtocol(consensusdata2);
-        //}
         babel.registerProtocol(consensusProto);
 
       
+        
         for (FrontendProto frontendProto : frontendProtos)
             frontendProto.init(configProps);
         for (TPOChainData  dataproto:dataProtos){
             dataproto.init(configProps);
         }
+        // 为什么这个必须放到最后面，因为这个是控制层，需要向Front和Data传递一些重要的初始化参数到它们的队列中
         consensusProto.init(configProps);
-        //if (consensusdata!=null){
-        //    consensusdata.init(configProps);
-        //    consensusdata2.init(configProps);
-        //}
-     
+
         
         
         //线程开
         babel.start();
 
+        
         Runtime.getRuntime().addShutdownHook( new Thread(new Runnable() {
             @Override
             public void run() {
@@ -232,6 +232,7 @@ public class HashMapApp implements Application {
     }
 
     
+    // 将IP地址参数填充一下再调用HashMapApp()构造函数
     public static void main(String[] args) throws InvalidParameterException, IOException,
             HandlerRegistrationException, ProtocolAlreadyExistsException, InterruptedException {
         Properties configProps =
@@ -274,6 +275,9 @@ public class HashMapApp implements Application {
         return null;
     }
 
+    
+    
+    
 
     /**
      * 被单个frontend调用执行单个读操作 或 写操作
@@ -289,8 +293,6 @@ public class HashMapApp implements Application {
             throw new AssertionError("Error decoding opData");
         }
         //logger.info("Exec op: " + op + (local ? "local" : ""));
-
-        //
         Pair<Integer, Channel> opInfo = local ? opMapper.remove(op.getId()) : null;
         if (op.getRequestType() == RequestMessage.WRITE) {
             store.put(op.getRequestKey(), op.getRequestValue());
@@ -299,7 +301,6 @@ public class HashMapApp implements Application {
                 opInfo.getRight().writeAndFlush(new ResponseMessage(opInfo.getLeft(), new byte[0]));
                 if(logger.isDebugEnabled()) logger.debug("Responding");
             }
-            
         } else { //READ
             if (local) {
                 nReads++;
@@ -311,6 +312,9 @@ public class HashMapApp implements Application {
     }
 
 
+    
+    
+    
 
     /**
      * 处理添加节点时
@@ -356,6 +360,10 @@ public class HashMapApp implements Application {
         }
     }
 
+    
+    
+    
+    
 
 
     /**
@@ -391,7 +399,7 @@ public class HashMapApp implements Application {
             logger.error("Exception caught.", cause);
             //ctx.fireExceptionCaught(cause);
         }
-
+        
         /**
         * 用户自定义事件 fireUserEventTriggered
         * */
@@ -424,7 +432,5 @@ public class HashMapApp implements Application {
                         FrontendProto.OpType.WRITE : FrontendProto.OpType.STRONG_READ);
             }
         }
-
     }
-
 }

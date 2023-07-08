@@ -3,14 +3,16 @@ package TPOChain;
 import TPOChain.notifications.FrontIndexNotification;
 import frontend.FrontendProto;
 import app.Application;
-import chainpaxos.ipc.ExecuteReadReply;
-import chainpaxos.timers.ReconnectTimer;
+import TPOChain.ipc.ExecuteReadReply;
+import TPOChain.timers.ReconnectTimer;
 import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
+import pt.unl.fct.di.novasys.babel.internal.BabelMessage;
+import pt.unl.fct.di.novasys.babel.internal.MessageInEvent;
 import pt.unl.fct.di.novasys.channel.tcp.events.OutConnectionDown;
 import pt.unl.fct.di.novasys.channel.tcp.events.OutConnectionFailed;
 import pt.unl.fct.di.novasys.channel.tcp.events.OutConnectionUp;
 import frontend.ipc.SubmitBatchRequest;
-import chainpaxos.ipc.SubmitReadRequest;
+import TPOChain.ipc.SubmitReadRequest;
 import frontend.network.*;
 import frontend.notifications.*;
 import frontend.ops.OpBatch;
@@ -129,6 +131,7 @@ public class TPOChainFront extends FrontendProto {
         
         registerTimerHandler(ReconnectTimer.TIMER_ID, this::onReconnectTimer);
         
+        
         //接收来自 proto的请求
         registerReplyHandler(ExecuteReadReply.REPLY_ID, this::onExecuteRead);
 
@@ -145,14 +148,8 @@ public class TPOChainFront extends FrontendProto {
     
     
     
-
-
-    /**
-     * 关于从HashMap App接收来的信息发往下一层protocol
-     * */
-
-    // -------------------- CLIENT OPS ------------------------------------
-
+    //---------CLIENT OPS-----关于从HashMap App是直接调用同步关系，不是异步完成;
+    
     /**
      * 接收从客户端接收来的信息，先缓存成批，最后成批处理
      * */
@@ -176,40 +173,37 @@ public class TPOChainFront extends FrontendProto {
         }
     }
 
-
-    /**
-     *将客户端来的写信息处理：若满足指定size的batch，则进行此项处理
-     * */
+    
+    
+    /**-----------------------写-------------------------*/
+    
+    //将客户端来的写信息处理：若满足指定size的batch，则进行此项处理
     private void sendNewWriteBatch() {
         long internalId = nextId();//nextId()生成了关于本地ip的有序列数
         OpBatch batch = new OpBatch(internalId, self, getProtoId(), writeDataBuffer);
         pendingWrites.add(Pair.of(internalId, batch));
+        
         writeDataBuffer = new ArrayList<>(BATCH_SIZE);//对缓存进行清空
         sendBatchToWritesTo(new PeerBatchMessage(batch));
+        
+        // 设置上次的发送时间
         lastWriteBatchTime = System.currentTimeMillis();
     }
     
     
-    //TODO 这里不用发送到leader处理,需要发送到前链节点
-    //  要不每个后链每个节点都绑定一个前链节点？
-    
-    // todo 原协议在转发到leader后怎么处理的  
-    
-    // 
     /**
      * 将写信息转发至writeTo即leader处理
      * */
     private void sendBatchToWritesTo(PeerBatchMessage msg) {
         //logger.info("发送"+msg+"到"+writesTo);
         if (writesTo.getAddress().equals(self)) {
-            onPeerBatchMessage(msg, writesTo, getProtoId(), peerChannel);
-        }
-        else if (writesToConnected){
+            // 原来直接
+            //onPeerBatchMessage(msg, writesTo, getProtoId(), peerChannel);
+            deliverMessageIn(new MessageInEvent(new BabelMessage(msg,getProtoId(),getProtoId()) ,new Host(self,PEER_PORT),peerChannel));
+        } else if (writesToConnected){
             sendMessage(peerChannel, msg, writesTo);
         }
     }
-
-    
     
     
     /**
@@ -222,7 +216,8 @@ public class TPOChainFront extends FrontendProto {
         sendRequest(new SubmitBatchRequest(msg.getBatch()),(short)(TPOChainData.PROTOCOL_ID+index));
     }
 
-
+    
+    //---------------读-----------------
     
     /**
      * 将客户端来的读信息处理：若满足指定size的batch，则进行此项处理
@@ -230,14 +225,16 @@ public class TPOChainFront extends FrontendProto {
     private void sendNewReadBatch() {
         long internalId = nextId();
         pendingReads.add(Pair.of(internalId, readDataBuffer));
+        //清空读缓存
         readDataBuffer = new ArrayList<>(LOCAL_BATCH_SIZE);
         sendRequest(new SubmitReadRequest(internalId, getProtoId()),TPOChainProto.PROTOCOL_ID);
         lastReadBatchTime = System.currentTimeMillis();
     }
     
-
     
-    //----------  TIMERS  ----
+    
+    
+    //-------------------TIMERS-----------------------
     
     /**
      * 在batch时间间隔内开启处理sendNewReadBatch()或sendNewWriteBatch()
@@ -310,8 +307,9 @@ public class TPOChainFront extends FrontendProto {
             logger.warn("Unexpected connectionFailed, ignoring: " + event);
         }
     }
-
-
+    
+    
+    
     /**
      * 与 writesTo尝试重新建立连接
      * */
@@ -368,16 +366,19 @@ public class TPOChainFront extends FrontendProto {
         });
     }
 
+    
+    
     //主要是改变成员列表参数，改变节点所指向的leader    WritesTo参数
     /**
      * logger.info("New writesTo: " + writesTo.getAddress());
      * */
     protected void onMembershipChange(MembershipChange notification, short emitterId) {
+        //改变分发消息的通道指向
         this.index=notification.getIndex();
      
         //update membership and responder
         membership = notification.getOrderedMembers();
-
+        
         //Writes to changed
         if (writesTo == null || !notification.getWritesTo().equals(writesTo.getAddress())) {
             //Close old writesTo
