@@ -44,12 +44,11 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     public final static short PROTOCOL_ID = 300;
     public final static String PROTOCOL_NAME = "TPOChainData";
 
-
+    
     public static final String ADDRESS_KEY = "consensus_address";
     public static final String DATA_PORT_KEY = "data_port";
     
-    //public static final String CONSENSUS_PORT_KEY = "consensus_port";
-
+    
 
     public static final String RECONNECT_TIME_KEY = "reconnect_time";
     public static final String NOOP_INTERVAL_KEY = "noop_interval";
@@ -66,14 +65,6 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     private final int QUORUM_SIZE;
     
     
-    //private Host nextOkFront;
-    //private boolean nextOkFrontConnected;
-    //private Host nextOkBack;
-    //private boolean nextOkBackConnected;
-    
-    //自己节点对分发消息使用通道的哪种序号的线程来处理
-    private short threadid;
-
     
 
     /**
@@ -81,7 +72,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
      */
     
     /**
-     * 继承接口实例填充到哪标记
+     * 继承接口实例的日志表
      * */
 
     /**
@@ -89,8 +80,6 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
      * 和 接收到accptcl的数量
      */
     //private Map<Host, RuntimeConfigure> hostConfigureMap ;
-    
-    
             
    
     private long frontflushMsgTimer = -1;
@@ -99,7 +88,8 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     private long lastSendTime;
 
     // 还有一个field ： System.currentTimeMillis(); 隐含了系统的当前时间
-
+    
+    
     private  long  lastReceiveAckTime;
     
     
@@ -163,7 +153,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     
     
     
-    
+    //废弃，因为Data是多数据
     public TPOChainData(Properties props, EventLoopGroup workerGroup) throws UnknownHostException {
         super(PROTOCOL_NAME, PROTOCOL_ID /*, new BetterEventPriorityQueue()*/);
         this.workerGroup = workerGroup;
@@ -229,6 +219,8 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         this.gcThread= new Thread(this::gcLoop, (PROTOCOL_NAME+index) + "-" + (short)(PROTOCOL_ID+index)+"---gc");
     }
 
+    
+    
     public void init(Properties props) throws HandlerRegistrationException, IOException {
         //申请网络通道
         Properties peerProps = new Properties();
@@ -758,8 +750,6 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
             if (!leader.getAddress().equals(self.getAddress()))
                 openConnection(leader, peerChannel);
         }
-        ////是否能进行开始处理操作 
-        //this.canHandleQequest=notification.isCanHandleRequest();
     }
     
     protected  void onFrontChainNotification(FrontChainNotification notification,short emitterID){
@@ -774,18 +764,18 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
             if (membership.size()==size){
                 break;
             }
-        }
-        //logger.info("输出前链"+membership);
+        }//logger.info("输出前链"+membership);
         
         //判断若前链中包括自己，那么设置一个标记
         if (membership.contains(self)){
             amFrontedNode=true;
+        }else {
+            amFrontedNode=false;
         }
         //得到链首
         Head=membership.get(0);
         
         //现在是前链
-        // TODO: 2023/6/26 刷新问题 
         //if (membership.contains(self)){
         //    frontflushMsgTimer = setupPeriodicTimer(FlushMsgTimer.instance, 5000,1000);
         //}else {
@@ -795,33 +785,35 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         backChain=notification.getBackchain();
         for (InetAddress tmp:backChain) {
             membership.add(new Host(tmp,data_port));
-        }
-        //logger.info("输出总链"+membership);
+        }//logger.info("输出总链"+membership);
         
         
+        //设置nextok节点
         int memsize=membership.size();
         int selfindex=membership.indexOf(self);
         Host newnextok=membership.get((selfindex+1)%memsize);
-        if (nextok==null){
-            nextok=newnextok;
-            openConnection(nextok);
-            return;
-        }
-        if (nextok!=null && !newnextok.equals(nextok)){
-            closeConnection(nextok);
-            nextokConnected=false;
-            nextok=newnextok;
-            openConnection(nextok);
+        if (nextok == null || !newnextok.equals(nextok)) {
+            //Close old writesTo
+            if (nextok != null && !nextok.getAddress().equals(self.getAddress())) {
+                nextokConnected = false;
+                closeConnection(nextok, peerChannel);
+            }
+            //Update and open to new writesTo
+            nextok =newnextok;
+            logger.info("New nextok connecting: " + nextok.getAddress());
+            if (!nextok.getAddress().equals(self.getAddress()))
+                openConnection(nextok, peerChannel);
         }
     }
-
+    
+    
+    //对自身节点的一些参数设置
     protected  void onInitializeCompletedNotification(InitializeCompletedNotification notification,short emitterID){
         selfInetAddress=self.getAddress();
         selfRuntimeConfigure=hostConfigureMap.get(selfInetAddress);
         selfInstanceMap=instances.get(selfInetAddress);
         newterm = new SeqN(0, self);
     }
-    
     
     
     // 在包含 线程号 是否为前链标志  nextokFront nextOkBack
@@ -896,9 +888,8 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     protected void onOutConnectionUp(OutConnectionUp event, int channel) {
         Host peer = event.getNode();
         if (peer.equals(leader)) {
-            //leaderConnected = true;
             canHandleQequest = true;
-            if (!waitingAppOps.isEmpty()){//
+            if (!waitingAppOps.isEmpty()){
                 AppOpBatch appOpBatch = waitingAppOps.poll();
                 // 处理 appOpBatch，可以对其进行操作或输出
                 sendNextAccept(appOpBatch);
@@ -910,15 +901,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
             nextokConnected=true;
             logger.info("already Connected to nextok :"+nextok.getAddress());
         }
-        //if (peer.equals(nextOkFront)) {
-        //    nextOkFrontConnected = true;
-        //    logger.info("Connected to nextOkFront: " + event);
-        //    return;
-        //}
-        //if (peer.equals(nextOkBack)) {
-        //    nextOkBackConnected = true;
-        //    logger.info("Connected to nextOkBack:" + event);
-        //}
+        
     }
 
 

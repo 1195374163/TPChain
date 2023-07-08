@@ -11,18 +11,14 @@ public class LeaderNotification extends ProtoNotification {
     
     private final Host leader;
     
-    private  final  boolean canHandleRequest;
     
     
-    public LeaderNotification(Host leader,boolean canHandleRequest) {
+    public LeaderNotification(Host leader) {
         super(NOTIFICATION_ID);
         this.leader=leader;
-        this.canHandleRequest=canHandleRequest;
     }
 
-    public boolean isCanHandleRequest() {
-        return canHandleRequest;
-    }
+
 
     public Host getLeader() {
         return leader;
