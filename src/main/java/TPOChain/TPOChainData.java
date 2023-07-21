@@ -756,9 +756,12 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     }
 
 
-
-
     
+    
+    
+    
+    
+    // TODO: 2023/7/21 对于向Leader节点失败的消息需要暂存之后重发，向nextOk失败的不需要重发 
 
     /**
      * 消息Failed，发出logger.warn("Failed:)

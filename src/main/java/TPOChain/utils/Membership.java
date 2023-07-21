@@ -6,13 +6,11 @@ import pt.unl.fct.di.novasys.network.data.Host;
 
 import java.util.*;
 
+//这里可以将链分为两个链节点之间有序;存放了系统中的节点同时附加一个标记hashset显示这个节点是标记删除的吗
 public class Membership {
-
+    
     private static final Logger logger = LogManager.getLogger(Membership.class);
     
-    //这里可以将链分为两个链 
-    //节点之间有序 存放了系统中的节点
-    //同时附加一个标记hashset显示这个节点是标记删除的吗
     //总链：前链和后链拼接
     private final List<Host> members;
     //前链
@@ -20,14 +18,15 @@ public class Membership {
     // 后链
     private final List<Host>  backChain;
 
+    
     //作为缓存，存放元素的索引位置
+    private final Map<Host, Integer> indexMap;
     private  final Map<Host, Integer> frontIndexMap;
     private  final Map<Host, Integer> backIndexMap;
-    private final Map<Host, Integer> indexMap;
+
     
-    
-    //对于要删除的节点，如果是后链，还保留着原来在list中的位置
-    //如果是前链移至后链链尾，并且将其纳入pendingRemoval集合在查询得到下一个节点要跳过这个节点
+    //对于要删除的节点，如果是后链，还保留着原来在list中的位置;
+    // 如果是前链移至后链链尾，并且将其纳入pendingRemoval集合在查询得到下一个节点要跳过这个节点
     /**
      * 待处理的要删除的节点
      * */
@@ -36,13 +35,15 @@ public class Membership {
     //标记着系统中最小的运行数量，也是系统中要求前链的数量此字段代表着F+1
     private final int MIN_QUORUM_SIZE;
 
+    
     //TODO join节点使用：复制集群中节点及其状态
     //对系统中的节点进行初始分配
     public Membership(List<Host> initial, int MIN_QUORUM_SIZE) {
         this.MIN_QUORUM_SIZE = MIN_QUORUM_SIZE;
         members = new ArrayList<>(initial);
-        frontChain=new ArrayList<Host>();
-        backChain=new ArrayList<Host>();
+        
+        frontChain=new ArrayList<>();
+        backChain=new ArrayList<>();
         for (int i = 0; i < initial.size(); i++) {
             if (i<MIN_QUORUM_SIZE){
                 frontChain.add(members.get(i));
@@ -63,32 +64,18 @@ public class Membership {
     }
     
     
+    
     /**
      * 返回节点在链表中的索引
      * */
-    public int indexOf(Host host) {
+    public  int  indexOf(Host host)    {
         return indexMap.computeIfAbsent(host, members::indexOf);
     }
     public  int  frontIndexOf(Host host){
         return frontIndexMap.computeIfAbsent(host, frontChain::indexOf);
     }
-    public  int   backIndexOf(Host host){
+    public  int  backIndexOf(Host host){
         return backIndexMap.computeIfAbsent(host, backChain::indexOf);
-    }
-
-    
-    /** 判断一个节点是否在集群里
-     * */
-    public boolean isAlive(Host host) {
-        if(indexOf(host) >= 0){
-            if (pendingRemoval.contains(host)){
-                return false;
-            }else {
-                return true;
-            }
-        }else {//说明节点不存在
-            return  false;
-        }
     }
     
     
@@ -104,6 +91,25 @@ public class Membership {
     public boolean  backChainContain(Host host){
         return backIndexOf(host) >= 0;
     }
+    
+    
+    
+    /** 判断一个节点是否在集群里:被标记删除的节点不在链中
+     * */
+    public boolean isAlive(Host host) {
+        if(indexOf(host) >= 0){
+            if (pendingRemoval.contains(host)){
+                return false;
+            }else {
+                return true;
+            }
+        }else {//说明节点不存在
+            return  false;
+        }
+    }
+    
+    
+
     
     
     //TODO  检测集群当前存活的节点，
@@ -146,7 +152,6 @@ public class Membership {
         int frontChainIndex=((leaderIndex-1)+frontChain.size())%frontChain.size();
         return frontChain.get(frontChainIndex);
     }
-    
     
     /**
      * 得到后链的首节点
@@ -442,6 +447,24 @@ public class Membership {
             }
         }
         return  tmp;
+    }
+    
+    // 根据参数Leader返回控制通道的逻辑链：,注不包括删除节点
+    public  List<Host>  getMembersFromLeaderHead(Host Leader){
+        List<Host>  tmp=new ArrayList<>();
+        //根据前链进行调整
+        int headindex=frontChain.indexOf(Leader);
+        int size=frontChain.size();
+        while(true){
+            tmp.add(frontChain.get(headindex));
+            headindex=(headindex+1)%size;
+            if (tmp.size()==size){//对前链节点全部拿到数据
+                break;  
+            }
+        }
+        //拿到后链非标记删除的节点
+        tmp.addAll(getBackChain());
+        return tmp;
     }
     
     @Override
