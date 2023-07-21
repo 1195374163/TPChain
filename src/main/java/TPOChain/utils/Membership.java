@@ -276,11 +276,14 @@ public class Membership {
         * */
         backChain.add(host);//节点添加都是后链末尾添加
         
+        //让我知道什么时候加入了新节点
+        logger.info("Membership adding member"+host);
+        
         members.clear();
         members.addAll(frontChain);
         members.addAll(backChain);
-        
-        logger.debug("New " + this);
+        if (logger.isDebugEnabled())
+            logger.debug("New " + this);
         checkFrontSizeAgainstQUORUM();
         checkSizeAgainstMaxFailures();
     }
@@ -293,7 +296,8 @@ public class Membership {
             logger.error("Removing non-existing host: " + host);
             throw new AssertionError("Trying to remove non-existing host: " + host);
         }
-        logger.debug("Removing member: " + host);
+        // 让我知道什么时候删除了故障节点
+        logger.info("Membership Removing member: " + host);
 
         members.remove(host);
         if (frontChainContain(host)){
@@ -312,7 +316,9 @@ public class Membership {
         members.addAll(frontChain);
         members.addAll(backChain);
         
-        logger.debug("New " + this);
+        if (logger.isDebugEnabled()){
+            logger.debug("New " + this);   
+        }
         checkFrontSizeAgainstQUORUM();
         checkSizeAgainstMaxFailures();
     }

@@ -76,7 +76,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     
     
     
-    
     //  对各项超时之间的依赖关系：
     //   noOp_sended_timeout  leader_timeout  reconnect_timeout 添加顺序有关
     //下面是具体取值
@@ -88,19 +87,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      * reconnect_time=1000
      * */
 
-    
-    
-    //打算废弃？不能废弃，因为 在系统处于状态不稳定(即无leader时)时，暂存一些重要命令，如其他节点发过来的
-    /**
-     * 在竞选leader时即候选者时暂存的命令
-     * */
-    private final Queue<AppOpBatch> waitingAppOps = new LinkedList<>();
-    
-    //成员添加命令呢？ 删除命令，这个旧领导可以不传给新leader，因为新Leader在当选成功后，会重新删掉已经断开连接的节点
-    private final Queue<MembershipOp> waitingMembershipOps = new LinkedList<>();
-
-    
-    
     
     
 
@@ -136,10 +122,27 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     private Host nextOkFront;
     private Host nextOkBack;
     
-    
+    //主要是重配前链，根据选定的Leader，从Membership生成以Leader为首节点的前链节点之后，最后是后链节点
+    private List<Host> members;
+    // nextOKFront和nextOkBack是静态的，，而nextOk是Leader选定之后，nextOK从nextOKFront和NextOkBack中选定一个
+    private Host nextOK;
+    //标记nextOk节点是否连接
+    private boolean  nextOkConnnected=false;
 
     
     
+    //打算废弃？不能废弃，因为 在系统处于状态不稳定(即无leader时)时，暂存一些重要命令，如其他节点发过来的排序命令
+    /**
+     * 在竞选leader时即候选者时暂存的命令
+     * */
+    private final Queue<AppOpBatch> waitingAppOps = new LinkedList<>();
+
+    //成员添加命令呢？ 删除命令，这个旧领导可以不传给新leader，因为新Leader在当选成功后，会重新删掉已经断开连接的节点
+    private final Queue<MembershipOp> waitingMembershipOps = new LinkedList<>();
+    
+    
+    
+
     /**
      * 是否为leader,职能排序
      * */
@@ -1096,7 +1099,10 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             logger.warn("not leader but receive SubmitOrderMsg ipc");
         }
     }
+
     
+    // TODO: 2023/7/19  noop太多，也影响性能，因为无效信息太多了，挤压正常信息的处理 ；
+    //  但是太少也不行，因为noop附带的前链节点上次的ack请求，然后执行，是否可以将noop与其他消息并行处理
     
     /**
      * 生成排序消息发给
@@ -1220,11 +1226,13 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         // 为什么需要前者，因为新leader选举出来会重发一些消息，所以需要判断instance.isDecided()
         if (!instance.isDecided() && instance.counter >= QUORUM_SIZE) //We have quorum!
             decideAndExecuteCL(instance);//决定并执行实例
+
+        // 将实例放入待执行队列中
+        olderInstanceClQueue.add(instance);
         
         if (msg.ack>highestAcknowledgedInstanceCl)
              ackInstanceCL(msg.ack);//对于之前的实例进行ack并进行垃圾收集
-        // 将实例放入待执行队列中
-        olderInstanceClQueue.add(instance);
+        
         //接收了此次消息 进行更新领导操作时间
         lastLeaderOp = System.currentTimeMillis();
     }
@@ -1523,22 +1531,22 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      * decide并执行Execute实例
      * */
     private void decideAndExecuteCL(InstanceStateCL instance) {
-        //if (logger.isDebugEnabled()){
+        //if (logger.isDebugEnabled())
         //    logger.debug("Decided: " + instance.iN + " - " + instance.acceptedValue);
-        //}
-        //Actually execute message
         if (instance.acceptedValue.type == PaxosValue.Type.SORT) {
             if (state == TPOChainProto.State.ACTIVE){
+                // 不做执行
             } else  //在节点处于加入join之后，暂存存放的批处理命令
                 // TODO: 2023/6/1 这里不对，在加入节点时，不能执行这个 
                 bufferedOps.add((SortValue) instance.acceptedValue);
         } else if (instance.acceptedValue.type == PaxosValue.Type.MEMBERSHIP) {
             executeMembershipOp(instance);
         } else if (instance.acceptedValue.type == PaxosValue.Type.NO_OP) {
-
+            //nothing  
         }
         instance.markDecided();
         highestDecidedInstanceCl++;
+        //放入旧的decide值
         olddecidequeue.add(highestDecidedInstanceCl);
     }
 
@@ -1552,11 +1560,13 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             logger.info("Removed from membership: " + target + " in inst " + instance.iN);
             membership.removeMember(target);
             triggerMembershipChangeNotification();
+            triggerFrontChainChange();
             closeConnection(target);
         } else if (o.opType == MembershipOp.OpType.ADD) {
             logger.info("Added to membership: " + target + " in inst " + instance.iN);
             membership.addMember(target);
             triggerMembershipChangeNotification();
+            triggerFrontChainChange();
             //对next  重新赋值
             nextOkFront=membership.nextLivingInFrontedChain(self);
             nextOkBack=membership.nextLivingInBackChain(self);
@@ -1572,11 +1582,11 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             if (!instances.containsKey(target)){
                 //局部日志进行初始化 
                 //Map<Host,Map<Integer, InstanceState>> instances 
-                ConcurrentMap<Integer, InstanceState>  ins=new ConcurrentHashMap<>();
+                ConcurrentMap<Integer, InstanceState>  ins=new ConcurrentHashMap<>(50000);
                 instances.put(target.getAddress(),ins);
             }
-
-
+            
+            
             if (state == TPOChainProto.State.ACTIVE) {
                 //运行到这个方法说明已经满足大多数了
                 sendMessage(new JoinSuccessMsg(instance.iN, instance.highestAccept, membership.shallowCopy()), target);
@@ -1594,11 +1604,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      * 对于ack包括以前的消息执行
      * */
     private void ackInstanceCL(int instanceN) {
-        //处理初始情况
-        if (instanceN<0){
-            return ;
-        }
-
         //处理重复消息或过时
         //if (instanceN<=highestAcknowledgedInstanceCl){
         //    logger.info("Discarding 重复 acceptackclmsg"+instanceN+"当前highestAcknowledgedInstanceCl是"+highestAcknowledgedInstanceCl);
@@ -1631,7 +1636,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //}
         
         if (msg.instanceNumber <= highestAcknowledgedInstanceCl) {
-            logger.warn("Ignoring acceptAckCL for old instance: " + msg);
+            logger.warn("Ignoring  acceptAckCL of Control  layer for old instance: " + msg);
             return;
         }
         
@@ -1645,6 +1650,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //这里下面两行调了顺序
         if (msg.instanceNumber>highestAcknowledgedInstanceCl)
             ackInstanceCL(msg.instanceNumber);
+        
         // FIXME: 2023/6/15 取消下面这个一直发送的noop消息，在低负载情况下开启
         //if (inst.acceptedValue.type != PaxosValue.Type.NO_OP)
         //    lastAcceptTimeCl = 0; //Force sending a NO-OP (with the ack)
@@ -2695,21 +2701,11 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //   如果是新加入节点，不止从ack开始发，应该从execute开始转发
         if (membership.contains(event.getNode())) {// 若集群节点含有这个
             establishedConnections.add(event.getNode());
-            
+            // TODO: 2023/7/19  将nextFront和nextokBack分别传输不同的消息
+            //  nextOk
             for (int i = highestAcknowledgedInstanceCl + 1; i <= highestAcceptedInstanceCl; i++) {
                 forwardCL(globalinstances.get(i));
             }
-            // FIXME: 2023/6/9 还需要转发分发消息
-            //// TODO: 2023/6/1 这里只转发ack及以上消息对吗？ 
-            //Iterator<Map.Entry<Host, Map<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
-            //while (outerIterator.hasNext()) {
-            //    // 获取外层 Map 的键值对
-            //    Map.Entry<Host, Map<Integer, InstanceState>> outerEntry = outerIterator.next();
-            //    Host host = outerEntry.getKey();
-            //    for (int i = hostConfigureMap.get(host).highestAcknowledgedInstance + 1; i <=  hostConfigureMap.get(host).highestAcceptedInstance; i++) {
-            //        forward(instances.get(host).get(i));
-            //    }
-            //}
         }
     }
 
