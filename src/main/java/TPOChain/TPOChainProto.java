@@ -5,6 +5,7 @@ import TPOChain.ipc.SubmitReadRequest;
 import TPOChain.notifications.*;
 import TPOChain.utils.*;
 import common.values.*;
+import org.apache.commons.lang3.tuple.Triple;
 import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
 import TPOChain.ipc.ExecuteReadReply;
 import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
@@ -76,10 +77,9 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     
     
     
-    //  对各项超时之间的依赖关系：
-    //   noOp_sended_timeout  leader_timeout  reconnect_timeout 添加顺序有关
-    //下面是具体取值
+    //  对各项超时之间的依赖关系：noOp_sended_timeout  leader_timeout  reconnect_timeout 关系到时钟线程几组的设置，添加顺序有关
     /**
+     * 下面是具体取值
      * leader_timeout=5000
      * noop_interval=100
      * join_timeout=3000
@@ -115,7 +115,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      * 代表自身，左右相邻主机
      * */
     private final Host self;
-    
+    // 打算废弃物理链，改用逻辑链
     /**
      * 消息的下一个节点
      * */
@@ -130,9 +130,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     //标记nextOk节点是否连接
     private boolean  nextOkConnnected=false;
 
-    
-    
-    
+
+    // TODO: 2023/7/25 在成为候选者，暂存的命令需要转发至新Leader：而且只能附加在Prepare 
     //打算废弃？不能废弃，因为 在系统处于状态不稳定(即无leader时)时，暂存一些重要命令，如其他节点发过来的排序命令
     /**
      * 在竞选leader时即候选者时暂存的命令
@@ -226,14 +225,15 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     //TODO eventually forget stored states... (irrelevant for experiments)
     //Waiting for application to generate snapshot (boolean represents if we should send as soon as ready)
     private final Map<Host, MutablePair<Integer, Boolean>> pendingSnapshots = new HashMap<>();
+
+    
+    //---------------------新加入节点方的数据结构------------------------------
     //Application-generated snapshots
+    // java中的三元组 Triple<Integer, String, Boolean> triplet;
     private final Map<Host, Pair<Integer, byte[]>> storedSnapshots = new HashMap<>();
     
     //给我这个节点发送 joinSuccess消息的节点  List of JoinSuccess (nodes who generated snapshots for me)
     private final Queue<Host> hostsWithSnapshot = new LinkedList<>();
-
-
-    //---------------------新加入节点方的数据结构------------------------------
     
     //这个需要 这里存储的是全局要处理的信息
     /**
@@ -244,7 +244,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     // TODO: 2023/7/21 加入的状态应该包含它这个状态执行到全局序列哪的序号，后续根据这个指标进行执行
     // TODO: 2023/7/21 加入之后关于执行线程和回收线程所需要的几个值的通道也需要初始化  
     private Map.Entry<Integer, byte[]> receivedState = null;
-    
     
     // TODO: 2023/7/21 关于日志状态的遗忘，因为时间，先不做，后续在优化，因为节点故障也不多
     private  List<Host>  canForgetSoredStateTarget;
@@ -355,8 +354,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     private Thread executionGabageCollectionThread;
     private BlockingQueue<Integer> olddackqueue= new LinkedBlockingQueue<>();
     private BlockingQueue<Integer> olddexecutequeue= new LinkedBlockingQueue<>();
-    
-    
+
+    // TODO: 2023/7/26 Leader宕机也需要向Data层发送通知， 或者不需要，因为Data层连接Leader的通道已经断开，不需要外部响应 
     
     /**
      *构造函数
@@ -1263,7 +1262,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     }
 
     
-    // TODO: 2023/6/16 这里将内容 
     /**
      *标记要删除的节点
      * */
@@ -1804,204 +1802,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     
     
     
-    //按照全局日志表执行命令:执行的是用户请求命令
-    private boolean execute(){
-        // 是使用调用处循环，还是方法内部使用循环?  外部使用
-        //for (int i=highestExecuteInstanceCl+1;i<= highestDecidedInstanceCl;i++){
-        //    InstanceStateCL  globalInstanceTemp=globalinstances.get(i);
-        //    if (globalInstanceTemp.acceptedValue.type!= PaxosValue.Type.SORT){
-        //        // 那消息可能是成员管理消息  也可能是noop消息
-        //        highestExecuteInstanceCl++;
-        //        if (logger.isDebugEnabled()){
-        //            logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+globalInstanceTemp.acceptedValue);
-        //        }
-        //    }else {// 是排序消息
-        //        SortValue sortTarget= (SortValue)globalInstanceTemp.acceptedValue;
-        //        Host  tempHost=sortTarget.getNode();
-        //        Map<Integer, InstanceState> tagetMap=instances.get(tempHost.getAddress());
-        //        int  iNtarget=sortTarget.getiN();
-        //        InstanceState ins= tagetMap.get(iNtarget);
-        //        //如果分发消息不为空就可以执行
-        //        if (ins == null ||  ins.acceptedValue ==null){
-        //            lacknode=tempHost;
-        //            lackid=iNtarget;
-        //        //if (ins == null || !ins.isDecided()){
-        //            if (ins==null){
-        //                if (logger.isDebugEnabled()){
-        //                    logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+sortTarget+";对应的分发实例还没有到位");
-        //                }
-        //            } else{
-        //                if (logger.isDebugEnabled()){
-        //                    logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+sortTarget+";对应的分发实例的值为空，还在填充中");
-        //                }
-        //            }
-        //            return false;// 不能进行执行,结束执行
-        //        }
-        //        triggerNotification(new ExecuteBatchNotification(((AppOpBatch) ins.acceptedValue).getBatch()));
-        //        highestExecuteInstanceCl++;
-        //    }
-        //}
-        return true;
-    }
-    //这里也包括了GC(垃圾收集)模块 垃圾收集 既对局部日志GC也对全局日志进行GC，即是使用对应数据结构的remove方法 对单个实例在进行ack时调用这个垃圾收集并进行触发读处理
-    private  void  gcAndRead(int iN,InstanceStateCL globalInstanceTemp,Map<Integer, InstanceState> targetMap,int targetid){
-        // 触发读
-        //globalInstanceTemp.getAttachedReads().forEach((k, v) -> sendReply(new ExecuteReadReply(v, globalInstanceTemp.iN), k));
-        //
-        //// 删除全局日志对应日志项
-        //globalinstances.remove(iN);
-        //
-        //// 下面若局部日志存在对方,则也进行GC
-        //if (targetMap==null){// 不存在局部日志的话，不应执行那下面几步
-        //    return ;
-        //}
-        //
-        ////删除局部日志对应的日志项
-        //targetMap.remove(targetid);
-    }
-    // 废弃
-    private void onGCTimer(GCTimer timer, long timerId) {
-
-    }
-    private boolean executeBack(){
-        // 是使用调用处循环，还是方法内部使用循环?  外部使用
-        //for (int i=highestExecuteInstanceCl+1;i<= highestDecidedInstanceCl;i++){
-        //    InstanceStateCL  globalInstanceTemp=globalinstances.get(i);
-        //    if (globalInstanceTemp.acceptedValue.type!= PaxosValue.Type.SORT){
-        //        // 那消息可能是成员管理消息  也可能是noop消息
-        //        highestExecuteInstanceCl++;
-        //        if (logger.isDebugEnabled()){
-        //            logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+globalInstanceTemp.acceptedValue);
-        //        }
-        //        if (i<highestAcknowledgedInstanceCl){
-        //            gcAndRead(i,globalInstanceTemp,null,-1);
-        //        }
-        //    }else {// 是排序消息
-        //        SortValue sortTarget= (SortValue)globalInstanceTemp.acceptedValue;
-        //        Host  tempHost=sortTarget.getNode();
-        //        Map<Integer, InstanceState> tagetMap=instances.get(tempHost.getAddress());
-        //        int  iNtarget=sortTarget.getiN();
-        //        InstanceState ins= tagetMap.get(iNtarget);
-        //        //如果分发消息不为空就可以执行
-        //        if (ins == null ||  ins.acceptedValue ==null){
-        //            lacknode=tempHost;
-        //            lackid=iNtarget;
-        //            //if (ins == null || !ins.isDecided()){
-        //            if (ins==null){
-        //                if (logger.isDebugEnabled()){
-        //                    logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+sortTarget+";对应的分发实例还没有到位");
-        //                }
-        //            } else{
-        //                if (logger.isDebugEnabled()){
-        //                    logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+sortTarget+";对应的分发实例的值为空，还在填充中");
-        //                }
-        //            }
-        //            return false;// 不能进行执行,结束执行
-        //        }
-        //        triggerNotification(new ExecuteBatchNotification(((AppOpBatch) ins.acceptedValue).getBatch()));
-        //        highestExecuteInstanceCl++;
-        //        if (i<highestAcknowledgedInstanceCl){
-        //            gcAndRead(i,globalInstanceTemp,tagetMap,iNtarget);
-        //        }
-        //    }
-        //}
-        return true;
-    }
-    private  void  gcAndReadBack(int iN,InstanceStateCL globalInstanceTemp,Map<Integer, InstanceState> targetMap,int targetid){
-        // 触发读
-        globalInstanceTemp.getAttachedReads().forEach((k, v) -> sendReply(new ExecuteReadReply(v, globalInstanceTemp.iN), k));
-
-        // 删除全局日志对应日志项
-        globalinstances.remove(iN);
-
-        // 下面若局部日志存在对方,则也进行GC
-        if (targetMap==null){// 不存在局部日志的话，不应执行那下面几步
-            return ;
-        }
-
-        //删除局部日志对应的日志项
-        targetMap.remove(targetid);
-    }
-    private void ackInstanceCLBack(int instanceN) {
-        ////处理初始情况
-        //if (instanceN<0){
-        //    return ;
-        //}
-        //
-        ////处理重复消息或过时
-        ////if (instanceN<=highestAcknowledgedInstanceCl){
-        ////    logger.info("Discarding 重复 acceptackclmsg"+instanceN+"当前highestAcknowledgedInstanceCl是"+highestAcknowledgedInstanceCl);
-        ////    return;
-        ////}
-        //
-        ////For nodes in the first half of the chain only
-        //for (int i = highestDecidedInstanceCl + 1; i <= instanceN; i++) {
-        //    InstanceStateCL ins = globalinstances.get(i);
-        //    //assert !ins.isDecided();
-        //    decideAndExecuteCL(ins);
-        //    //assert highestDecidedInstanceCl == i;
-        //}
-        //
-        //// 进行ack信息的更新
-        //// 使用++ 还是直接赋值好 
-        //highestAcknowledgedInstanceCl++;
-        //
-        //
-        ////当ack小于等于exec，进行GC清理
-        //if (highestAcknowledgedInstanceCl<highestExecuteInstanceCl){
-        //    InstanceStateCL ins = globalinstances.get(highestAcknowledgedInstanceCl);
-        //    if (ins.acceptedValue.type!= PaxosValue.Type.SORT){
-        //        gcAndRead(highestAcknowledgedInstanceCl,ins,null,-1);
-        //    }else {
-        //        SortValue sortTarget= (SortValue)ins.acceptedValue;
-        //        Map<Integer, InstanceState>  tagetMap=instances.get(sortTarget.getNode());
-        //        int  iNtarget=sortTarget.getiN();
-        //        gcAndRead(highestAcknowledgedInstanceCl,ins,tagetMap,iNtarget);
-        //    }
-        //}
-    }
-    private void decideAndExecuteCLBack(InstanceStateCL instance) {
-        //instance.markDecided();
-        //highestDecidedInstanceCl++;
-        ////if (logger.isDebugEnabled()){
-        ////    logger.debug("Decided: " + instance.iN + " - " + instance.acceptedValue);
-        ////}
-        //// FIXME: 2023/6/26 如果加入执行线程那么，上面的decide++ 应该放在执行之后
-        ////Actually execute message
-        //if (instance.acceptedValue.type == PaxosValue.Type.SORT) {
-        //    if (state == TPOChainProto.State.ACTIVE){
-        //        //synchronized (executeLock){
-        //        //    execute();
-        //        //}
-        //        execute();
-        //    } else  //在节点处于加入join之后，暂存存放的批处理命令
-        //        // TODO: 2023/6/1 这里不对，在加入节点时，不能执行这个 
-        //        bufferedOps.add((SortValue) instance.acceptedValue);
-        //} else if (instance.acceptedValue.type == PaxosValue.Type.MEMBERSHIP) {
-        //    executeMembershipOp(instance);
-        //    //synchronized (executeLock){
-        //    //    execute();
-        //    //}
-        //    execute();
-        //} else if (instance.acceptedValue.type == PaxosValue.Type.NO_OP) {
-        //    //nothing
-        //    //synchronized (executeLock){
-        //    //    execute();
-        //    //}
-        //    execute();
-        //}
-    }
-
-    
-    
-    
-    
-    
-
- 
-    
-    
-    
     
     
 
@@ -2060,6 +1860,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //取消作为前链节点的定时刷新时钟 
         //cancelTimer(frontflushMsgTimer); 
     }
+    
     
     //TODO  新加入节点应该联系后链节点，不应该联系前链节点
     // 需要吗？  不需要，因为系统从哪个节点(前链，还是后链) 称为 复制节点
@@ -2294,7 +2095,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //storedSnapshots.remove();
     }
 
-
+    // TODO: 2023/7/25  新加入的节点如果是之前的节点还需要拿到之前的配置
 
     
 
@@ -2310,39 +2111,13 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     // 不应该接收，因为当前的候选节点不是总能成为leader，那么暂存的这些消息将一直保留在这里
     // 但直接丢弃也不行，直接丢弃会损失数据
     
-
-/**----------------涉及读 写  成员更改--------------------------------------------------- */
-/**----------接收上层中间件来的消息---------------------*/    
+    
+    /**----------涉及读 写  成员更改;接收上层中间件来的消息---------------------*/    
 
     /**
      * 当前时leader或正在竞选leader的情况下处理frontend的提交batch
      */
-    //public void onSubmitBatch(SubmitBatchRequest not, short from) {
-    //    if (amFrontedNode) {// 改为前链节点  原来是amqurom
-    //        if (canHandleQequest){//这个标志意味着leader存在
-    //            //先将以往的消息转发
-    //            // 还有其他候选者节点存储的消息
-    //            if (logger.isDebugEnabled()){
-    //                logger.debug("接收来自front层的批处理并开始处理sendNextAccept():"+not.getBatch());
-    //            }
-    //            sendNextAccept(new AppOpBatch(not.getBatch()));
-    //        }else {// leader不存在，无法排序
-    //            if (logger.isDebugEnabled()){
-    //                logger.debug("因为现在还没有leader,缓存来自front的批处理:"+not.getBatch());
-    //            }
-    //            waitingAppOps.add(new AppOpBatch(not.getBatch()));
-    //        }
-    //    } else //忽视接受的消息
-    //        logger.warn("Received " + not + " without being FrontedNode, ignoring.");
-    //
-    //    // TODO: 2023/6/8 需要处理暂存的消息 
-    //    //PaxosValue nextOp;
-    //    //if (!waitingAppOps.isEmpty()){
-    //    //    while ((nextOp = waitingAppOps.poll()) != null) {
-    //    //        sendNextAccept(nextOp);
-    //    //    }
-    //    //}
-    //}
+
 
 
     /**
@@ -2421,6 +2196,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         }
     }
 
+    // TODO: 2023/7/23  当Leader宕机立马进行Leader选举
     /**
      * 当向外连接断掉时的操作，发出删除节点的消息
      * */
@@ -2477,8 +2253,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     //  maybeCancelPendingRemoval   maybeAddToPendingRemoval
     //  因为新leader的选举成功  特别是消息的重发时，因为term变了，还得接受这个消息
     //  对删除消息可能要重复执行
-
-    // TODO: 2023/6/7 因为 maybeAddToPendingRemoval()方法实际改变了节点的排布情况
+    
+    // 因为 maybeAddToPendingRemoval()方法实际改变了节点的排布情况
     
     
     //  Utils   工具方法

@@ -31,17 +31,18 @@ public class RuntimeConfigure {
     public int highestDecidedInstance = -1;
     public int highestAcknowledgedInstance = -1;
     public int highestExecutedInstance=-1;
-    // GC标记不一定紧贴着 ack或execute
+    // GC标记不一定非要紧贴着 ack或execute，可以相差100个数
     public  int highestGCInstance=-1;
     
-    // 由控制协议的执行线程赋值
+    
+    // 由控制协议的执行线程，赋值，由各节点的Data 的GC线程使用，错过
     public BlockingQueue<Integer>  executeFlagQueue= new LinkedBlockingQueue<>();
+    
     
     // TODO: 2023/5/23 用来向新加入节点转发各个commandleader节点的分发情况 
     //  主要后链链尾用来定时向命令的coommandleader发送ack信息
     //  节点在收到这个节点的分发消息的时间
     // TODO: 2023/5/29 在commandleader发送noop消息，启动一个时钟，到时停止计时并且对noop消息自动进行ack 
     public long lastAcceptTime=0;
-    
-    
+    // TODO: 2023/7/26 当取对应的前链节点一直不发送对应消息的Ack消息：可能由于前链节点故障，那么有末尾节点向全局发送ack消息 
 }

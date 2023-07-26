@@ -38,7 +38,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 
 public class TPOChainData extends GenericProtocol  implements ShareDistrubutedInstances {
 
-    //下面是字段名的String
+    //下面是字段名
     private static final Logger logger = LogManager.getLogger(TPOChainData.class);
 
     public final static short PROTOCOL_ID = 300;
@@ -50,9 +50,11 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     
     
 
-    public static final String RECONNECT_TIME_KEY = "reconnect_time";
+ 
     public static final String NOOP_INTERVAL_KEY = "noop_interval";
-
+    
+    public static final String RECONNECT_TIME_KEY = "reconnect_time";
+    
     public static final String QUORUM_SIZE_KEY = "quorum_size";
 
 
@@ -66,20 +68,24 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     
     
     
+    
+    
     // 使用这条通道的历来节点的链表，主要是因为前链节点可能故障，恢复时会有新节点重新使用这条通道
     // 添加：如果这个根据accpetNodeInetAddress添加其中
     // 删除：当收到这个节点的ack达到accpt数且新的通道使用者不是这个节点，这个可以删除
     private final Set<InetAddress> hashSetAcceptNode = new HashSet<>();
-    // 还有accpetNodeInetAddress 显示是当前通道的使用者 
-
-
+    // 还有accpetNodeInetAddress 显示是当前通道的使用者
+    
+    // TODO: 2023/7/25 根据从TPOChainProto传过来的前链节点分析当前通道的使用者
+    private  InetAddress  channelUser;
+    
 
     
 
     /**
      *还有继承接口的局部日志表
      */
-    
+
     /**
      * 继承接口实例的日志队列
      * */
@@ -88,9 +94,11 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
      * 继承接口的对节点的一些配置信息，主要是各前链节点分发的实例信息
      * 和 接收到accptcl的数量
      */
-    //private Map<Host, RuntimeConfigure> hostConfigureMap ;
+    //   private Map<Host, RuntimeConfigure> hostConfigureMap ;
             
-   
+            
+            
+            
     private long frontflushMsgTimer = -1;
     //前链节点使用：在commandleader发送第一条命令的时候开启闹钟，在第一次ack和  accept与send  相等时，关闹钟，刚来时
     //主要是前链什么时候发送flushMsg信息
@@ -99,15 +107,21 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     // 还有一个field ： System.currentTimeMillis(); 隐含了系统的当前时间
     
     
-    
     // 作为前链节点上次接收ack的时间
     private  long  lastReceiveAckTime;
     
     
     
+    
+    
+    
+    
     //是前链但还不能处理请求的暂存队列，在leader不存在或还没有连接成功时暂存
     private final Queue<AppOpBatch> waitingAppOps = new LinkedList<>();
-
+    
+    //向Leader申请排序的失败的，必须等待Leader重新连接之后，重发到Leader
+    private final  Queue<AppOpBatch>  failtoLeaderAppOps=new LinkedList<>();
+    
     // 不需要 Or 需要 
     private final Queue<AppOpBatch> waitingSortValue = new LinkedList<>();
     
@@ -133,7 +147,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     private boolean nextokConnected;
     //leader 向leader发送排序请求，这里的端口号是TPOChainProto的端口50300而不是自己的50200 
     private Host leader; //private boolean leaderConnected;
-   
+    
     //标记前链节点能否开始处理客户端的请求 其实可以废弃,用leaderConnnected标记代替
     private boolean canHandleQequest = false;
     
@@ -144,14 +158,17 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     private boolean amFrontedNode;
 
     
+    
 
     // GC线程使用 ------older
     private BlockingQueue<Integer> oldackqueue    = new LinkedBlockingQueue<Integer>();
-    private int  lastsendack=-1;// 每一百进行一次
-    private BlockingQueue<Integer> oldexecutequeue= new LinkedBlockingQueue<Integer>();
-    private int  lastsendexecute=-1; //每一百
     // gc线程
     private  Thread gcThread;
+    private int  lastsendack=-1;// 每一百进行一次
+    // 下面的其实不用，从配置文件中直接找
+    private BlockingQueue<Integer> oldexecutequeue= new LinkedBlockingQueue<Integer>();
+    private int  lastsendexecute=-1; //每一百
+
 
     
 
@@ -163,50 +180,21 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
      */
     private EventLoopGroup workerGroup;
 
-
-    //废弃，因为Data是多数据
-    public TPOChainData(Properties props, EventLoopGroup workerGroup) throws UnknownHostException {
-        super(PROTOCOL_NAME, PROTOCOL_ID /*, new BetterEventPriorityQueue()*/);
-        this.workerGroup = workerGroup;
-
-        amFrontedNode = false; //默认不是前链节点
-        canHandleQequest = false;//相应的默认不能处理请求
-
-        //端口号为50200 ：
-        self = new Host(InetAddress.getByName(props.getProperty(ADDRESS_KEY)),
-                Integer.parseInt(props.getProperty(DATA_PORT_KEY)));
-        //不管是排序还是分发消息：标记下一个节点
-
-        //nextOkFront = null;
-        //nextOkBack = null;
-        leader = null;
-        //
-        //nextOkFrontConnected = false;
-        //nextOkBackConnected = false;
-        //leaderConnected = false;
-
-
-        //this.PEER_PORT = Integer.parseInt(props.getProperty(DATA_PORT_KEY));
-        //this.CONSENSUS_PORT = Integer.parseInt(props.getProperty(CONSENSUS_PORT_KEY));
-
-        this.RECONNECT_TIME = Integer.parseInt(props.getProperty(RECONNECT_TIME_KEY));
-        this.NOOP_SEND_INTERVAL = Integer.parseInt(props.getProperty(NOOP_INTERVAL_KEY));
-
-        this.QUORUM_SIZE = Integer.parseInt(props.getProperty(QUORUM_SIZE_KEY));
-    }
+    
+    
     public TPOChainData(Properties props,short index, EventLoopGroup workerGroup) throws UnknownHostException {
         super(PROTOCOL_NAME+index, (short)(PROTOCOL_ID+index) /*, new BetterEventPriorityQueue()*/);
         this.workerGroup = workerGroup;
-        
+
         this.index=index;
-        
+
         amFrontedNode = false; //默认不是前链节点
-        
+
         //端口号为50200到50203
         data_port=Integer.parseInt(props.getProperty(DATA_PORT_KEY))+index;
         self = new Host(InetAddress.getByName(props.getProperty(ADDRESS_KEY)),
                 data_port);
-        
+
         //不管是排序还是分发消息：标记下一个节点
         //nextOkFront = null;
         //nextOkBack = null;
@@ -218,8 +206,8 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         //leaderConnected = false;
         nextokConnected=false;
         canHandleQequest = false;//相应的默认不能处理请求
-        
-        
+
+
         //this.PEER_PORT = Integer.parseInt(props.getProperty(DATA_PORT_KEY));
         //this.CONSENSUS_PORT = Integer.parseInt(props.getProperty(CONSENSUS_PORT_KEY));
 
@@ -229,7 +217,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
 
         this.gcThread= new Thread(this::gcLoop, (PROTOCOL_NAME+index) + "-" + (short)(PROTOCOL_ID+index)+"---gc");
     }
-
+    
     
     
     public void init(Properties props) throws HandlerRegistrationException, IOException {
@@ -881,8 +869,8 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         openConnection(timer.getHost());
     }
 
-    
-    
+
+    // TODO: 2023/7/25 向Leader发送失败的 和 leader连接标识为false的存放在两个队列中 
     
 
     /**

@@ -57,12 +57,17 @@
 <!--        </dependency>-->
 <!--        -->
         
-                <dependency>
-                    <groupId>pt.unl.fct.di.novasys</groupId>
-                    <artifactId>babel-core</artifactId>
-                    <version>0.8.0</version>
-                </dependency>
-                
+        <dependency>
+            <groupId>pt.unl.fct.di.novasys</groupId>
+            <artifactId>babel-core</artifactId>
+            <version>0.8.0</version>
+        </dependency>
+<!--        生成三元组需要这个依赖包-->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-lang3</artifactId>
+            <version>3.12.0</version>
+        </dependency>
         <dependency>
             <groupId>org.apache.zookeeper</groupId>
             <artifactId>zookeeper</artifactId>
