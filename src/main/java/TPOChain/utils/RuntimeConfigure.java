@@ -6,6 +6,8 @@ import java.util.concurrent.LinkedBlockingQueue;
 //主要用来对节点执行前链节点的分发命令情况做标记，由节点自动管理
 //TODO  新加入的节点要保存一份这个，还要生成一份局部日志
 public class RuntimeConfigure {
+    // TODO: 2023/7/27 是否给每个配置文件加个锁：加入一个访问更改锁？多个锁呢
+    
     public  RuntimeConfigure(){}
     
     public RuntimeConfigure(int lastAcceptSent, int highestAcceptedInstance,
@@ -44,5 +46,5 @@ public class RuntimeConfigure {
     //  节点在收到这个节点的分发消息的时间
     // TODO: 2023/5/29 在commandleader发送noop消息，启动一个时钟，到时停止计时并且对noop消息自动进行ack 
     public long lastAcceptTime=0;
-    // TODO: 2023/7/26 当取对应的前链节点一直不发送对应消息的Ack消息：可能由于前链节点故障，那么有末尾节点向全局发送ack消息 
+    // TODO: 2023/7/26 当取对应的前链节点一直不发送对应消息的Ack消息：可能由于前链节点故障，那么有末尾节点向全局发送ack消息
 }

@@ -1134,6 +1134,9 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      * 生成排序消息发给
      * **/
     private void sendNextAcceptCL(PaxosValue val) {
+        // TODO: 2023/7/27 在control端可以判定这个之前的实例是不是发送排序了，没有则生成之前和这次的实例 
+        //  若这个实例长时间不存在则空过这个的执行
+        
         
         InstanceStateCL instance;
         if (!globalinstances.containsKey(lastAcceptSentCl + 1)) {
