@@ -35,7 +35,7 @@ public class RuntimeConfigure {
     public  int highestGCInstance=-1;
     
     
-    // 由控制协议的执行线程，赋值，由各节点的Data 的GC线程使用，错过
+    // 由控制协议的执行线程，赋值，由各节点的Data 的GC线程使用，错过也不要紧，后续有新值同样顶替旧值的作用
     public BlockingQueue<Integer>  executeFlagQueue= new LinkedBlockingQueue<>();
     
     

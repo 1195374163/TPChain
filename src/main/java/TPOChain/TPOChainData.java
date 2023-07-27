@@ -41,15 +41,20 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     //下面是字段名
     private static final Logger logger = LogManager.getLogger(TPOChainData.class);
 
+    
     public final static short PROTOCOL_ID = 300;
     public final static String PROTOCOL_NAME = "TPOChainData";
-
+    // 下面还有一个通道的标识
+    
+    
     
     public static final String ADDRESS_KEY = "consensus_address";
+    // 值等于原始协议号+通道标识
     public static final String DATA_PORT_KEY = "data_port";
     
     
 
+    
  
     public static final String NOOP_INTERVAL_KEY = "noop_interval";
     
@@ -58,6 +63,8 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     public static final String QUORUM_SIZE_KEY = "quorum_size";
 
 
+    
+    
     
     // 下面是变量
     private final int NOOP_SEND_INTERVAL;
@@ -70,44 +77,31 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     
     
     
-    // 使用这条通道的历来节点的链表，主要是因为前链节点可能故障，恢复时会有新节点重新使用这条通道
-    // 添加：如果这个根据accpetNodeInetAddress添加其中
-    // 删除：当收到这个节点的ack达到accpt数且新的通道使用者不是这个节点，这个可以删除
-    private final Set<InetAddress> hashSetAcceptNode = new HashSet<>();
-    // 还有accpetNodeInetAddress 显示是当前通道的使用者
-    
-    // TODO: 2023/7/25 根据从TPOChainProto传过来的前链节点分析当前通道的使用者
-    private  InetAddress  channelUser;
-    
-
     
 
     /**
-     *还有继承接口的局部日志表
+     *继承接口的局部分配日志表
      */
 
     /**
      * 继承接口实例的日志队列
      * */
-
+    
     /**
-     * 继承接口的对节点的一些配置信息，主要是各前链节点分发的实例信息
-     * 和 接收到accptcl的数量
+     * 继承接口的对节点的一些配置信息，主要是各前链节点分发的实例信息和接收到accptcl的数量
      */
-    //   private Map<Host, RuntimeConfigure> hostConfigureMap ;
-            
-            
-            
-            
-    private long frontflushMsgTimer = -1;
-    //前链节点使用：在commandleader发送第一条命令的时候开启闹钟，在第一次ack和  accept与send  相等时，关闹钟，刚来时
-    //主要是前链什么时候发送flushMsg信息
-    private long lastSendTime;
+ 
 
-    // 还有一个field ： System.currentTimeMillis(); 隐含了系统的当前时间
+
+
+
+    //前链节点使用：在commandleader发送第一条命令的时候开启闹钟，在第一次ack和  accept与send  相等时，关闹钟，刚来时
+    //主要是前链什么时候发送flushMsg信息    
+    private long frontflushMsgTimer = -1;
+    // 上一次发送发送accept附带的ack的时间
+    private long lastSendTime;
     
-    
-    // 作为前链节点上次接收ack的时间
+    // 作为前链节点上次接收ack的时间：如果长时间没有新的实例过来，那么ack信息需要重新发送
     private  long  lastReceiveAckTime;
     
     
@@ -116,58 +110,66 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     
     
     
-    //是前链但还不能处理请求的暂存队列，在leader不存在或还没有连接成功时暂存
+    
+    //是前链但还不能处理请求的暂存队列，即在leader不存在或还没有连接成功时暂存
     private final Queue<AppOpBatch> waitingAppOps = new LinkedList<>();
     
-    //向Leader申请排序的失败的，必须等待Leader重新连接之后，重发到Leader
+    //向Leader发送申请排序的失败的，必须等待Leader重新连接之后，重发到Leader
     private final  Queue<AppOpBatch>  failtoLeaderAppOps=new LinkedList<>();
+
+
+
     
-    // 不需要 Or 需要 
-    private final Queue<AppOpBatch> waitingSortValue = new LinkedList<>();
+    // 使用这条通道的历来节点的链表，主要是因为前链节点可能故障，恢复时会有新的前链节点重新使用这条通道，需要重发一下ack信息
+    // 添加：如果这个根据accpetNodeInetAddress添加其中
+    // 删除：当收到这个节点的ack达到accpt数且新的通道使用者不是这个节点，这个可以删除
+    private final Set<InetAddress> hashSetAcceptNode = new HashSet<>();
+
+    //根据从TPOChainProto传过来的前链节点分析当前通道的使用者
+    private  InetAddress  channelUser;
+
     
     
-    
+    //Data通道的标记，使用哪个通道，初始构建确定的，是不可更改的
+    private  short  index;
     //前链
     private  List<InetAddress>  frontChain;
     //后链
     private List<InetAddress>  backChain;
-    //数据端口
+    //数据端口：=初始端口+通道标识
     private int  data_port;
-    
     //总链：前链加后链：元素是包含端口号的完整 ip:port
     protected List<Host> membership=new ArrayList<>();
-    //Data通道的标记，使用哪个通道
-    private  short  index;
+
     // 这个数据通道中的链首
     private Host Head;
     //前链连接和后链连接
     private Host self;
-    //下一个节点
+    //下一个节点：链尾的节点将nextOk需要连接Head节点，因为链尾节点需要向Head
     private Host  nextok;
     private boolean nextokConnected;
     //leader 向leader发送排序请求，这里的端口号是TPOChainProto的端口50300而不是自己的50200 
     private Host leader; //private boolean leaderConnected;
-    
     //标记前链节点能否开始处理客户端的请求 其实可以废弃,用leaderConnnected标记代替
     private boolean canHandleQequest = false;
     
     // 根据membership推算出自己是否为前链节点
     /**
-     * 标记是否为前段节点，代表者可以发送command，并向leader发送排序
+     * 标记是否为前段节点，是的话可以分发消息，并向leader发送排序
      */
     private boolean amFrontedNode;
 
     
     
+    
 
-    // GC线程使用 ------older
-    private BlockingQueue<Integer> oldackqueue    = new LinkedBlockingQueue<Integer>();
+    
     // gc线程
     private  Thread gcThread;
-    private int  lastsendack=-1;// 每一百进行一次
-    // 下面的其实不用，从配置文件中直接找
-    private BlockingQueue<Integer> oldexecutequeue= new LinkedBlockingQueue<Integer>();
-    private int  lastsendexecute=-1; //每一百
+    // 旧的分发消息的ack  还有   旧的执行信息(这个从配值文件找)
+    private BlockingQueue<Integer> oldackqueue    = new LinkedBlockingQueue<Integer>();
+
+
 
 
     
@@ -630,6 +632,8 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     protected  void onFrontChainNotification(FrontChainNotification notification,short emitterID){
         //logger.info("接收来的通知是"+notification.getFrontChain()+notification.getBackchain());
         frontChain=notification.getFrontChain();
+        //根据控制层传递得到通道使用者是哪个节点
+        channelUser=frontChain.get(index);
         membership.clear();
         int size=frontChain.size();
         int loopindex=index;
@@ -864,10 +868,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         }
     }
     
-    private  void  onReconnectTimer(ReconnectTimer timer,long timerId){
-        logger.info("时钟到了，重新连接");
-        openConnection(timer.getHost());
-    }
+
 
 
     // TODO: 2023/7/25 向Leader发送失败的 和 leader连接标识为false的存放在两个队列中 

@@ -60,7 +60,9 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     
     
     public static final String INITIAL_STATE_KEY = "initial_state";
+    
     public static final String INITIAL_MEMBERSHIP_KEY = "initial_membership";
+    
     public static final String QUORUM_SIZE_KEY = "quorum_size";
 
     
