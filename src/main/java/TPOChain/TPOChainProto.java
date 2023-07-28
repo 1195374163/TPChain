@@ -520,7 +520,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         logger.info("TPOChainProto: " + membership + " qs " + QUORUM_SIZE);
     }
     
-
+    // --------------------------触发Leader选举
+    
     /**
      * 初始状态为Active开始启动节点
      * */
