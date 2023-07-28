@@ -7,7 +7,9 @@ import java.util.concurrent.LinkedBlockingQueue;
 //TODO  新加入的节点不仅要复制原有的配置表  消息队列  局部日志表 ，如果原配置中没有还要新生成一个一份新加入节点的
 public class RuntimeConfigure {
     // TODO: 2023/7/27 是否给每个配置文件加个锁：加入一个访问更改锁？多个锁呢：访问不同的字段
-    public  RuntimeConfigure(){}
+    public  RuntimeConfigure(){
+        
+    }
     
     public RuntimeConfigure(int lastAcceptSent, int highestAcceptedInstance,
                             int highestDecidedInstance,int highestAcknowledgedInstance){
@@ -18,12 +20,11 @@ public class RuntimeConfigure {
         this.highestAcknowledgedInstance=highestAcknowledgedInstance;
     }
 
-    
-    public  int   lastOrderInstance=-1;  // leader排序时使用，测试是否是否有空缺
     // TODO 如果这个长期没有，需要重新向Leader发申请排序
     //  或者Leader 在排序时，发现现在排序 -   上次排序大于1 ，应该对之前的也顺便排序（必须）。
     //  这个可能是bug，先不考虑，后期结果不对，再考虑可能是这个
-    
+    public  int   lastOrderInstance=-1;  // leader排序时使用，测试是否是否有空缺
+
     
     
     //记录各个command leader进行命令的分发的序号，某个节点在故障恢复后，又成为新的前链节点，那前链节点使用这个，其他节点不使用用这个
@@ -46,7 +47,7 @@ public class RuntimeConfigure {
 
     //这个是Data通道的GC线程改变和上面的可能同时改变， GC标记不一定非要紧贴着 ack或execute，可以相差100个数
     public  int highestGCInstance=-1;
-    // 旧的ack值的队列：在uponacceptMsg()中使用
+    // 旧的ack值的队列：在uponacceptMsg()中赋值，在gc线程中使用
     public BlockingQueue<Integer>  ackFlagQueue= new LinkedBlockingQueue<>();
     
     
@@ -61,5 +62,5 @@ public class RuntimeConfigure {
     //TODO: 2023/7/26 当取对应的前链节点一直不发送对应消息的Ack消息：可能由于前链节点故障，那么有末尾节点向全局发送ack消息
     public long  lastReceiveAckTime=0;
     
-    // 还有个当前时间System.currenttime  这个与lastReceiveAckTime之差
+    // 还有个当前时间System.currentTimeMillis()  这个与lastReceiveAckTime之差
 }

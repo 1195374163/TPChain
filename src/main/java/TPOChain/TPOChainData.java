@@ -428,7 +428,8 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         // 得到分发消息的来源节点
         accpetNodeInetAddress = msg.sN.getNode().getAddress();
         acceptInstanceMap = instances.get(accpetNodeInetAddress);
-
+        
+        //得到分发消息的哪个实例日志
         InstanceState instance;
         if (!acceptInstanceMap.containsKey(msg.iN)) {
             instance=new InstanceState(msg.iN);
@@ -437,76 +438,77 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
             instance=acceptInstanceMap.get(msg.iN);
         }
         
-        
-        //"Discarding decided msg" 当instance
-        //if (instance.isDecided()) {
-        //    logger.warn("Discarding decided acceptmsg");
-        //    return;
-        //}
-
-        //如果消息是新生成的那么,它的投票数为0,肯定不满足下面这个条件，若是重发的则直接满足条件进行丢弃
+    
+        //去重：如果消息是新生成的那么,它的投票数为0,肯定不满足下面这个条件，若是重发的则直接满足条件进行丢弃
         if (msg.nodeCounter +1  <= instance.counter) {
-            logger.warn("Discarding 已经在局部表存在的acceptmsg");
+            logger.warn("Discarding already existing acceptmsg");
             return;
         }
         
         
         // 先得到排序commandleader节点的配置信息
         acceptRuntimeConfigure = hostConfigureMap.get(accpetNodeInetAddress);
-
-        //进行更新领导操作时间
-        //hostSendConfigure.lastAcceptTime = System.currentTimeMillis();
-
         
         //进行对实例的确定
         instance.accept(msg.sN, msg.value, (short) (msg.nodeCounter + 1));
-
-
+        //进行更新领导操作时间
+        acceptRuntimeConfigure.lastAcceptTime = System.currentTimeMillis();
+        
         //更新highestAcceptedInstance信息
         if (acceptRuntimeConfigure.highestAcceptedInstance < instance.iN) {
-            acceptRuntimeConfigure.highestAcceptedInstance++;
+            acceptRuntimeConfigure.highestAcceptedInstance=instance.iN;
             //assert hostConfigureMap.get(sender).highestAcceptedInstance == instance.iN;
         }
-
-        //  先转发，还是先ack，应该携带的ack是消息中自带的ack，而不是自己的 
-        forward(instance);//转发下一个节点
-
         
-        // TODO: 2023/7/28  下面是ack的处理，注意下面还需要完善 ：这里是对携带的ack信息的处理
-        // 前段节点没有decide ，后端节点已经decide，
-        //if (!instance.isDecided() && instance.counter >= QUORUM_SIZE) //We have quorum!
-        //    decideAndExecute(instance);//决定并执行实例
+        
+        //下面是ack的处理，注意下面还需要完善 ：这里是对携带的ack信息的处理
         if (msg.ack > acceptRuntimeConfigure.highestAcknowledgedInstance) {
-            //对于之前的实例进行ack并进行垃圾收集
-           // ackInstance(accpetNodeInetAddress, msg.ack);
-            //if (msg.ack <= acceptRuntimeConfigure.highestAcknowledgedInstance) {
-            //    logger.info("Discarding 重复的 acceptackmsg;当前节点是"  + "当前的要确定的序号是" + instanceN + "当前的acceptack序号是" + hostSendConfigure.highestAcknowledgedInstance);
-            //    return;
-            //}
-            acceptRuntimeConfigure.highestAcknowledgedInstance++;
-        }
-        
-        //若当前节点将目前的通道使用节点加入集合中，将这条语句放入状态改变之后
-        if (!hashSetAcceptNode.contains(accpetNodeInetAddress)){
-            hashSetAcceptNode.add(accpetNodeInetAddress);
+            acceptRuntimeConfigure.highestAcknowledgedInstance=msg.ack;
         }
 
-        // TODO: 2023/7/27 将ack信息放入队列中，注意标注是什么节点的ack信息。 
         
-        //将instance添加到消息队列中:
+        // 先转发，还是先ack，应该携带的ack是消息中自带的ack，而不是自己的
+        forward(instance,accpetNodeInetAddress);
+        
+        //若当前节点将目前的通道使用节点加入集合中，将这条语句放入状态改变之后，不包含当前节点
+        //if (!hashSetAcceptNode.contains(accpetNodeInetAddress)){
+        //    hashSetAcceptNode.add(accpetNodeInetAddress);
+        //}
+        
+        //将instance添加到对应的消息队列中:
         hostMessageQueue.get(accpetNodeInetAddress).add(instance);
+        
+        
+        //将ack信息放入队列中，注意标注是什么节点的ack信息：已解决，将对应节点的ack
+        acceptRuntimeConfigure.ackFlagQueue.add(msg.ack);
+        // TODO: 2023/7/28 将 
     }
 
-
+    // 修复除了uponacceptMsg()用forward()，还有uponConnectionUp()建立
+    //  所以需要传递用哪个节点的参数，需要在形参中加入使用那个节点
     /**
      * 转发accept信息给下一个节点
      */
-    private void forward(InstanceState inst) {
+    private void forward(InstanceState inst,InetAddress acceptNode) {
+        // TODO: 2023/7/28 不完善：
+        //  如果Head节点不是消息的发送节点，需要向全体集群发送ack消息
+        //  如果节点
+
+        // TODO: 2023/7/28 如果转发ack信息，应该是消息中的ack，而不是实例中得的ack， 
+        //  但因为除了uponacceptMsg()消息使用，还有
         Host sendHost = inst.highestAccept.getNode();
+        // 拿到对应节点的分发配置信息
+        RuntimeConfigure  acceptNodeRuntimeConfigure=hostConfigureMap.get(acceptNode);
         //发送ack信息
         if (nextok.equals(Head)){
-            AcceptAckMsg acceptAckMsgtemp = new AcceptAckMsg(sendHost, inst.iN);
-            sendMessage(acceptAckMsgtemp, nextok);
+            if (Head.equals(sendHost)){// 前链节点没有发生更换
+                AcceptAckMsg acceptAckMsgtemp = new AcceptAckMsg(sendHost, inst.iN);
+                sendMessage(acceptAckMsgtemp, nextok);
+            }else {// 前链节点发生更换，需要向所有节点发送ack消息
+                AcceptAckMsg acceptAckMsgtemp = new AcceptAckMsg(sendHost, inst.iN);
+                //拿到集群中所有节点
+                sendMessage(acceptAckMsgtemp, nextok);
+            }
         }else {//正常的转发
             AcceptMsg msg = new AcceptMsg(inst.iN, inst.highestAccept, inst.counter, inst.acceptedValue,
                     acceptRuntimeConfigure.highestAcknowledgedInstance);
@@ -535,9 +537,9 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
             logger.warn("Ignoring acceptAck of Data for old instance: " + msg+"from"+from);
             return;
         }
-        
-        // 执行ack程序
-        ackHostRuntimeConfigure.highestAcknowledgedInstance++;
+
+        // TODO: 2023/7/28   执行ack程序，取消++，改为直接赋值 
+        ackHostRuntimeConfigure.highestAcknowledgedInstance=msg.instanceNumber;
 
 
         //在接收ack，如果是之前的通道使用者，且这个使用者的ack和accept相等，
@@ -563,13 +565,17 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
      * 对最后的此节点的消息进行发送ack信息  FlushMsgTimer
      */
     private void onFlushMsgTimer(FlushMsgTimer timer, long timerId) {
-        
-        if (lastReceiveAckTime-lastSendTime>NOOP_SEND_INTERVAL){
-            membership.stream().filter(h -> !h.equals(self)).forEach(host -> sendMessage(new AcceptAckMsg(self, selfRuntimeConfigure.highestAcknowledgedInstance), host));
-            if (logger.isDebugEnabled()) {
-                logger.debug("向所有节点发送了acceptack为" + hostConfigureMap.get(self).highestAcknowledgedInstance + "的定时信息");
-            }  
-            cancelTimer(frontflushMsgTimer);
+        // TODO: 2023/7/28 只能是前链节点才能使用这个功能，不是前链节点取消这个功能 
+        if (amFrontedNode){
+            if (lastReceiveAckTime-lastSendTime>NOOP_SEND_INTERVAL){
+                membership.stream().filter(h -> !h.equals(self)).forEach(host -> sendMessage(new AcceptAckMsg(self, selfRuntimeConfigure.highestAcknowledgedInstance), host));
+                if (logger.isDebugEnabled()) {
+                    logger.debug("向所有节点发送了acceptack为" + hostConfigureMap.get(self).highestAcknowledgedInstance + "的定时信息");
+                }
+                cancelTimer(frontflushMsgTimer);
+            }
+        }else {
+            //Nothing
         }
     }
 
@@ -731,7 +737,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
                 Map<Integer, InstanceState>   elementInstanceMap =instances.get(element);
                 RuntimeConfigure  elementRuntimeConfigure= hostConfigureMap.get(element);
                 for (int i = elementRuntimeConfigure.highestAcknowledgedInstance + 1; i <= elementRuntimeConfigure.highestAcceptedInstance; i++) {
-                    forward(elementInstanceMap.get(i));
+                    forward(elementInstanceMap.get(i),element);
                 }
             }
             //channelUser=frontChain.get(index);
@@ -740,7 +746,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
             // 现在的通道使用者重发ack->accept的分发消息
             if (channelUserRuntimeConfigure!=null){
                 for (int i = channelUserRuntimeConfigure.highestAcknowledgedInstance + 1; i <= channelUserRuntimeConfigure.highestAcceptedInstance; i++) {
-                    forward(channelUserInstanceMap.get(i));
+                    forward(channelUserInstanceMap.get(i),channelUser);
                 }
             }
             logger.info("already Connected to nextok :"+nextok.getAddress());

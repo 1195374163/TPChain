@@ -11,9 +11,8 @@ public interface ShareDistrubutedInstances {
     //局部日志
     Map<InetAddress,Map<Integer, InstanceState>> instances = new HashMap<>(100);
     
-    //每一个Data通道都有着自己的消息队列
+    //每一个Data通道都有着自己的消息队列,新加入节点需要将日志从日志表中放入消息队列中
     Map<InetAddress, BlockingQueue<InstanceState>>  hostMessageQueue=new HashMap<>(100);
-    
     
     // 局部日志的配置表
     Map<InetAddress,RuntimeConfigure>  hostConfigureMap=new HashMap<>(100);
