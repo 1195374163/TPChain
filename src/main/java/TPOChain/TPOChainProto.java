@@ -2295,6 +2295,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     }
     
     
+    // 用到这里的应该是prepare  prepareOk   accept   electionok 几种消息  
     /**
      * 发送消息给自己和其他主机
      */

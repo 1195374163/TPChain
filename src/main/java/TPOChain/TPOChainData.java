@@ -95,7 +95,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
 
 
 
-    //前链节点使用：在commandleader发送第一条命令的时候开启闹钟，在第一次ack和  accept与send  相等时，关闹钟，刚来时
+    //前链节点使用：在commandleader接收ack时开启一次性闹钟发完即关闭，在第一次ack和  accept与send  相等时，关闹钟，刚来时
     //主要是前链什么时候发送flushMsg信息    
     private long frontflushMsgTimer = -1;
     // 上一次发送发送accept附带的ack的时间
@@ -109,19 +109,18 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     
     
     
-    
-    
     //是前链但还不能处理请求的暂存队列，即在leader不存在或还没有连接成功时暂存
     private final Queue<AppOpBatch> waitingAppOps = new LinkedList<>();
     
-    //向Leader发送申请排序的失败的，必须等待Leader重新连接之后，重发到Leader
+    //前链节点使用：向Leader发送申请排序的失败的，必须等待Leader重新连接之后，重发到Leader
     private final  Queue<OrderMSg>  failtoLeaderAppOps=new LinkedList<>();
 
 
 
     
-    // 使用这条通道的历来节点的链表，主要是因为前链节点可能故障，恢复时会有新的前链节点重新使用这条通道，需要重发一下ack信息
-    // 添加：如果这个根据accpetNodeInetAddress添加其中
+    
+    // 使用这条通道的历来节点(不包含当前节点)的链表，主要是因为前链节点可能故障，恢复时会有新的前链节点重新使用这条通道，需要重发一下ack信息
+    // 添加：如果这个根据在更换前链的方法中将accpetNodeInetAddress添加其中
     // 删除：当收到这个节点的ack达到accpt数且新的通道使用者不是这个节点，这个可以删除
     private final Set<InetAddress> hashSetAcceptNode = new HashSet<>();
 
@@ -129,6 +128,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     private  InetAddress  channelUser;
     private  Map<Integer, InstanceState>  channelUserInstanceMap;
     private  RuntimeConfigure  channelUserRuntimeConfigure;
+    
     
     
     //Data通道的标记，使用哪个通道，初始构建确定的，是不可更改的
@@ -160,12 +160,10 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
      */
     private boolean amFrontedNode;
 
-    
-    
-    
 
     
-    // gc线程
+    // TODO: 2023/7/28  GC回收通道使用者的旧日志    那历来使用者的日志呢  
+    // gc线程 ：
     private  Thread gcThread;
     // 旧的分发消息的ack  还有   旧的执行信息(这个从配值文件找)
     private BlockingQueue<Integer> oldackqueue    = new LinkedBlockingQueue<Integer>();
@@ -269,7 +267,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
 
     
     // TODO: 2023/7/27 修复错误gc线程:程序爆Null错误，一般就是这出了问题：解决办法是当换节点时清空ack表
-    //  强制设定  GC线程只处理  通道使用者的回收任务,因为别的节点也不会残余太多
+    //  强制设定  GC线程只处理  通道使用者的回收任务,因为别的节点就算剩余也不会残余太多
     // FIXME: 2023/7/28   不使用accept使用channeluser 而且对通道使用者每一轮进行缓存到中间变量
     private void gcLoop() {
         // 应该负责清除本通道的数据分发
@@ -375,9 +373,19 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
 
         //InstanceState instance = selfInstanceMap.computeIfAbsent(selfRuntimeConfigure.lastAcceptSent + 1, InstanceState::new);
         //assert instance.acceptedValue == null && instance.highestAccept == null;
-        //PaxosValue nextValue = val;
         //对当前的生成自己的seqn,以线程通道id为count，self为标记
+        
+        
+        // 先发给自己:这里直接使用对应方法
+        //this.uponAcceptMsg(new AcceptMsg(instance.iN, newterm,
+        //        (short) 0, nextValue,hostSendConfigure.highestAcknowledgedInstance), self, this.getProtoId(), peerChannel);
+        sendOrEnqueue(new AcceptMsg(instance.iN, newterm,
+                (short) 0, val, selfRuntimeConfigure.highestAcknowledgedInstance), self);
 
+        //设置发送标记数
+        selfRuntimeConfigure.lastAcceptSent = instance.iN;
+        
+        
         //重发所有失败的申请排序信息
         if(!failtoLeaderAppOps.isEmpty()){
             while(!failtoLeaderAppOps.isEmpty()){
@@ -387,16 +395,6 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         //同时向leader发送排序请求:排序不发noop消息改成直接向全体节点发送ack设置一个时钟,什么时候开启,什么时候关闭
         OrderMSg orderMSg = new OrderMSg(self, instance.iN);
         sendOrEnqueue(orderMSg, leader);
-        
-        
-        // 先发给自己:这里直接使用对应方法
-        //this.uponAcceptMsg(new AcceptMsg(instance.iN, newterm,
-        //        (short) 0, nextValue,hostSendConfigure.highestAcknowledgedInstance), self, this.getProtoId(), peerChannel);
-        sendOrEnqueue(new AcceptMsg(instance.iN, newterm,
-                (short) 0, val, selfRuntimeConfigure.highestAcknowledgedInstance), self);
-        
-        //设置发送标记数
-        selfRuntimeConfigure.lastAcceptSent = instance.iN;
     }
 
     
@@ -409,19 +407,19 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     
     //------------接收Accept信息---------------下面的和通道使用者可能相同也可能不同---------------------------
     private InetAddress accpetNodeInetAddress;
-    private  Map<Integer, InstanceState>  acceptInstanceMap;
     private  RuntimeConfigure  acceptRuntimeConfigure;
+    private  Map<Integer, InstanceState>  acceptInstanceMap;
     
     /**
      * 处理accept信息
      */
     private void uponAcceptMsg(AcceptMsg msg, Host from, short sourceProto, int channel) {
         //对不在系统中的节点发送未定义消息让其重新加入系统
-        //if (!membership.contains(from)) {
-        //    logger.warn("Received msg from unaffiliated host " + from);
-        //    sendMessage(new UnaffiliatedMsg(), from, TCPChannel.CONNECTION_IN);
-        //    return;
-        //}
+        if (!membership.contains(from)) {
+            logger.warn("Received msg from unaffiliated host " + from);
+            sendMessage(new UnaffiliatedMsg(), from, TCPChannel.CONNECTION_IN);
+            return;
+        }
         
         //if (logger.isDebugEnabled()) {
         //    logger.debug("接收到" + from + "的" + msg);
@@ -438,7 +436,6 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         }else {
             instance=acceptInstanceMap.get(msg.iN);
         }
-        //InstanceState instance = acceptInstanceMap.computeIfAbsent(msg.iN, InstanceState::new);
         
         
         //"Discarding decided msg" 当instance
@@ -473,8 +470,9 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
 
         //  先转发，还是先ack，应该携带的ack是消息中自带的ack，而不是自己的 
         forward(instance);//转发下一个节点
+
         
-        
+        // TODO: 2023/7/28  下面是ack的处理，注意下面还需要完善 ：这里是对携带的ack信息的处理
         // 前段节点没有decide ，后端节点已经decide，
         //if (!instance.isDecided() && instance.counter >= QUORUM_SIZE) //We have quorum!
         //    decideAndExecute(instance);//决定并执行实例
