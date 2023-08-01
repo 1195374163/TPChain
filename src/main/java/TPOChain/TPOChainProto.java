@@ -79,7 +79,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     
     
     
-    //  对各项超时之间的依赖关系：noOp_sended_timeout  leader_timeout  reconnect_timeout 关系到时钟线程几组的设置，添加顺序有关
+    //注意对各项超时之间的依赖关系：noOp_sended_timeout  leader_timeout  reconnect_timeout 关系到时钟线程几组的设置，添加顺序有关
     /**
      * 下面是具体取值
      * leader_timeout=5000
@@ -95,7 +95,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     /**
      * 节点的状态：在加入整个系统中的状态变迁
      * */
-    enum State {JOINING, WAITING_STATE_TRANSFER, ACTIVE}
+    public enum State {JOINING, WAITING_STATE_TRANSFER, ACTIVE}
     private TPOChainProto.State state;
 
     /**
@@ -104,7 +104,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     private Membership membership;
 
     /**
-     * 已经建立连接的主机
+     * 已经建立连接的主机,连接是指向外的连接
      * */
     private final Set<Host> establishedConnections = new HashSet<>();
     
@@ -117,6 +117,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      * 代表自身，左右相邻主机
      * */
     private final Host self;
+    
     // 打算废弃物理链，改用逻辑链
     /**
      * 消息的下一个节点
@@ -125,23 +126,31 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     private Host nextOkBack;
     
     
-    //主要是重配前链，根据选定的Leader，从Membership生成以Leader为首节点的前链节点之后，最后是后链节点
+    //主要是重新配前链，根据选定的Leader，从Membership生成以Leader为首节点的前链节点之后，之后依次接入后链节点
     private List<Host> members;
     // nextOKFront和nextOkBack是静态的，，而nextOk是Leader选定之后，nextOK从nextOKFront和NextOkBack中选定一个
     private Host nextOK;
     //标记nextOk节点是否连接
     private boolean  nextOkConnnected=false;
 
+    
+    
 
-    // TODO: 2023/7/25 在成为候选者，暂存的命令需要转发至新Leader：而且只能附加在Prepare 
+    // TODO: 2023/7/31   在成为候选者之后有新Leader比自身大那么暂存的排序命令需要转发至新Leader,而且只能附加在Prepare
+    //    新Leader从prepareOk消息其中拿出  暂存的排序 和  已经排完序的accept消息
     //打算废弃？不能废弃，因为 在系统处于状态不稳定(即无leader时)时，暂存一些重要命令，如其他节点发过来的排序命令
     /**
      * 在竞选leader时即候选者时暂存的命令
      * */
     private final Queue<AppOpBatch> waitingAppOps = new LinkedList<>();
-
+    
+    
     //成员添加命令呢？ 删除命令，这个旧领导可以不传给新leader，因为新Leader在当选成功后，会重新删掉已经断开连接的节点
+    // TODO  关于添加成员的命令也需要转发，删除成员的命令不需要转发了，也附带在prepare之中
     private final Queue<MembershipOp> waitingMembershipOps = new LinkedList<>();
+    
+    
+    
     
     
     
@@ -151,7 +160,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      * Leader节点使用 是否为leader,职能排序
      * */
     private boolean amQuorumLeader;
-
+    // TODO: 2023/8/1  amQuorumLeader 会和support Leader不一致吗？
     /**
      * leader使用，隔断时间发送no-op命令
      * */
@@ -246,9 +255,14 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     // TODO: 2023/7/21 加入的状态应该包含它这个状态执行到全局序列哪的序号，后续根据这个指标进行执行
     // TODO: 2023/7/21 加入之后关于执行线程和回收线程所需要的几个值的通道也需要初始化  
     private Map.Entry<Integer, byte[]> receivedState = null;
+    // TODO: 2023/7/31 状态和后续的execute------>joininstacneIN 之间的消息(存储在)是配套的，
+    //  可以添加一个map集合，或Pair 显示状态和消息的组合，当两者齐全之后进行状态的装载和消息的填充
+    //   也添加消息的的缓存
     
-    // TODO: 2023/7/21 关于日志状态的遗忘，因为时间，先不做，后续在优化，因为节点故障也不多
+    
+    // TODO: 2023/7/21 关于日志状态的遗忘，因为时间，先不做，后续在优化，因为节点故障也不多浪费的存储也不多
     private  List<Host>  canForgetSoredStateTarget;
+    
 
 
     
@@ -278,7 +292,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     
     //--------------传递给下层Data层的成员指标，代表Data端的主机映射
     
-    private  List<InetAddress> frontChain=new ArrayList<>();
+    private  List<InetAddress>  frontChain=new ArrayList<>();
     private  List<InetAddress>  backChain=new ArrayList<>();
     //todo 以消息的投票数决定发到下一个前链节点(少于F+1)，还是发往后链节点(>=F+1)
     // 在commandleader被替换时注意(即进行mark之后)，断开前的那个节点要往新的节点以及ack到accept的
@@ -335,11 +349,10 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
 
     //leader使用，即使发生leader交换时，由新leader接棒：由新leader根据所有节点的accept信息来推断出lastAcceptSent
     private int lastAcceptSentCl = -1;
-    
-    
-    
-    // 加入一个执行锁:为什么加入这个，因为添加状态需要读取状态，而执行线程需要更新状态
-    // 做法：将锁放入最小的执行单元，因为执行线程可能等待消息队列而阻塞整个线程，锁一直释放不了
+
+
+    // TODO: 2023/7/31   加入一个执行锁:为什么加入这个，因为添加状态需要读取状态，而执行线程需要更新状态
+    //  做法：将锁放入最小的执行单元，因为执行线程可能等待消息队列而阻塞整个线程，锁一直释放不了
     private final Object  executeLock=new Object();
     
     // decide的值的变化，避开对一个值的加锁
@@ -394,6 +407,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         this.STATE_TRANSFER_TIMEOUT = Integer.parseInt(props.getProperty(STATE_TRANSFER_TIMEOUT_KEY));
 
         this.state = TPOChainProto.State.valueOf(props.getProperty(INITIAL_STATE_KEY));
+        // TODO: 2023/8/1 可以在这里通知data层 
         seeds = readSeeds(props.getProperty(INITIAL_MEMBERSHIP_KEY));//返回的是LinkedList<Host>
     }
 
@@ -491,7 +505,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                 
         
 
-        //接收从front 和  读请求
+        //接收从front的   读请求
         registerRequestHandler(SubmitReadRequest.REQUEST_ID, this::onSubmitRead);
         // 接收从data层的排序request
         registerRequestHandler(SubmitOrderMsg.REQUEST_ID, this::onSubmitOrderMsg);
@@ -582,17 +596,17 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         this.executionGabageCollectionThread.start();
     }
 
-    /**将前链和后链节点传递到Data层
+    /**改变物理链,将前链和后链节点传递到Data层
     */
     private void  changeDataFrontAndBackChain(){
-        // 清空原来的内容
+        // 清空前链原来的内容
         frontChain.clear();
         // 复制前链
         List<Host> tmpfrontChain= membership.getFrontChain();
         for (int i=0;i<tmpfrontChain.size();i++){
             frontChain.add(tmpfrontChain.get(i).getAddress());
         }
-        // 清空原来的内容
+        // 清空后链原来的内容
         backChain.clear();
         //复制后链
         List<Host> tmpbackChain= membership.getBackChain();
@@ -602,7 +616,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //触发Data层的列表改变
         triggerFrontChainChange();
     }
-  
+    
     
     /**
      *前链节点执行的pre操作
@@ -622,7 +636,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //对下一个消息节点进行重设 
         nextOkFront =membership.nextLivingInFrontedChain(self);
         nextOkBack  =membership.nextLivingInBackChain(self);
-        //triggerThreadidamFrontNextFrontNextBackChange();
+
         if (logger.isDebugEnabled()){
             logger.debug("在frontChainNodeAction()结尾处nextOkFront是"+nextOkFront+"; nextOkBack是"+nextOkBack);
         }
@@ -634,9 +648,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     
     //TODO  考虑删除节点  在删除节点时，leader故障   在删除节点时，它又新加入集群
 
-    
-    // TODO: 2023/6/6 leader故障，需要添加一个节点到前链节点,是前链节点
-    //  pull协议 在故障在leader节点和非leader节点
+
     
     
     
@@ -703,18 +715,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     // 此节点会接收term比当前tem小的过时消息，此消息已经失效
     
     
-    //Notice
-    // 消息的有效性
-    // 发送消息的节点一定是自己集群中的节点
     
-    
-    
-    // Notice 
-    //  消息的顺序性： 
-    
-    /*
-     * 处理PrepareMsg消息
-     */
     /**
      * logger.info(msg + " 来自: " + from);
      * */
@@ -792,6 +793,11 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     }
     
     
+    
+    
+    
+    
+    
     // Front层不需要连接nextokfront和nextokBack节点需要的因为leader
     /**
      * 向front层发送成员改变通知
@@ -819,10 +825,10 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     
     
     /**
-     * 在初始化中调用
+     * 在初始化中调用和前后链发生改变时调用
      */
     private  void  triggerFrontChainChange(){
-        logger.info("前链"+frontChain+"后链是"+backChain);
+        //logger.info("前链"+frontChain+"后链是"+backChain);
         triggerNotification(new FrontChainNotification(frontChain,backChain));
     }
     
@@ -837,11 +843,16 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         triggerNotification(new InitializeCompletedNotification());
     }
     
-    private  void  triggerIndexChange(){
-        triggerNotification(new FrontIndexNotification(
-               membership.frontIndexOf(self)));
-        logger.warn("当前节点是前链"+self.toString());
+    // TODO: 2023/8/1 触发状态改变： data层和control层状态一致，特别在outConnectionUp()中根据这个状态，判断是否转发消息 
+    private  void  triggerStateChange(){
+        // 这个不需要序列和反序列化
     }
+    
+
+    
+
+    
+    
     
     
     
@@ -1063,7 +1074,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         setNewInstanceLeader(msg.iN, msg.sN);
         triggerLeaderChange();
     }
-
+    
+    
     
     
     /**
@@ -1104,24 +1116,33 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      *  其他节点的data端发过来OrderMsg信息，在这里接收
      */
     private void uponOrderMSg(OrderMSg msg, Host from, short sourceProto, int channel) {
+        // 还有一种情况，当是候选者 ？已解决：排序请求不需要有候选者，因为Data层在旧Leader死机时，停止发送排序请求
         if (amQuorumLeader){//只有leader才能处理这个排序请求
             //if (logger.isDebugEnabled()){
             //    logger.debug("我是leader,收到"+from+"的"+msg+"开始sendNextAcceptCL()");
             //}
             sendNextAcceptCL(new SortValue(msg.node,msg.iN));
-        }else {//对消息进行转发,转发到leader
+        }else if (supportedLeader().equals(self)){// 当为候选者
+            // TODO: 2023/8/1 将排序请求缓存 
+            
+        } else {//对消息进行转发,转发到leader
             sendOrEnqueue(msg,supportedLeader());
             logger.warn("not leader but receive OrderMSg msg");
         }
     }
-    
-    
-    // 只有自己为leader时,自己的data端调用这个
+
+
+    /**
+     * 只有自己为leader时,自己的data端调用这个
+     */
     public void onSubmitOrderMsg(SubmitOrderMsg not, short from){
         OrderMSg msg=not.getOrdermsg();
         if (amQuorumLeader){//只有leader才能处理这个排序请求
             sendNextAcceptCL(new SortValue(msg.node,msg.iN));
-        }else {//对消息进行转发,转发到leader
+        } else if (supportedLeader().equals(self)){// 当为候选者
+            // TODO: 2023/8/1 将排序请求缓存 
+            
+        } else {//对消息进行转发,转发到leader
             sendOrEnqueue(msg,supportedLeader());
             logger.warn("not leader but receive SubmitOrderMsg ipc");
         }
@@ -2090,7 +2111,9 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             sendMessage(new StateTransferMsg(not.getSnapshotInstance(), not.getState()), not.getSnapshotTarget());
         }
     }
-   
+
+    // TODO: 2023/7/31 新加入节点接收暂存消息，生成数据结构
+    
     /**
      * 设置一个时钟对超时的状态进行删除操作 ：这个时间和状态转换的时间有关系，比他大一点 
      * */
@@ -2101,31 +2124,28 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //storedSnapshots.remove();
     }
 
-    // TODO: 2023/7/25  新加入的节点如果是之前的节点还需要拿到之前的配置
-
-    
-
-    
-
+    // TODO: 2023/7/25  新加入的节点如果是之前的节点还需要拿到之前的配置，根据传入
 
 
     
     
+    
+    
+    
+    
+    
+    
 
-    //TODO 在节点候选时
-    // waitingAppOps   waitingMembershipOps接收正常操作 
-    // 不应该接收，因为当前的候选节点不是总能成为leader，那么暂存的这些消息将一直保留在这里
-    // 但直接丢弃也不行，直接丢弃会损失数据
-    
-    
     /**----------涉及读 写  成员更改;接收上层中间件来的消息---------------------*/    
 
     /**
      * 当前时leader或正在竞选leader的情况下处理frontend的提交batch
      */
 
-
-
+    // 在节点处于候选者时，waitingAppOps  waitingMembershipOps接收正常操作 
+    //不应该接收，因为当前的候选节点不是总能成为leader，那么暂存的这些消息将一直保留在这里
+    //但直接丢弃也不行，直接丢弃会损失数据
+    
     /**
      *处理frontend发来的批处理读请求
      * */
@@ -2142,20 +2162,23 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         }
     }
 
-
+    
+    // 两个地方使用,一个是和别的节点断开连接 一个是刚当选新Leader，对集群中不能连接的节点删除
     /**
      *接收处理成员改变Msg：在Leader断开某个节点启动
      */
     private void uponMembershipOpRequestMsg(MembershipOpRequestMsg msg, Host from, short sourceProto, int channel) {
         if (amQuorumLeader)//不改，成员管理还是由leader负责
             sendNextAcceptCL(msg.op);
-        else if (supportedLeader().equals(self))
+        else if (supportedLeader().equals(self))//是候选者，其实很少用，因为调用处都是Leader调用
             waitingMembershipOps.add(msg.op);
         else
             logger.warn("Received " + msg + " without being leader, ignoring.");
     }
 
 
+    
+    
     
     
     
@@ -2183,7 +2206,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         if (logger.isDebugEnabled()){
             logger.debug(event);
         }
-        //logger.info("初始化时有没有这条消息，有的话说明向外输出通道已经建立，是openconnection()调用建立的");
+        // 是新加入节点
         if(state == TPOChainProto.State.JOINING)
             return;
         //todo 新加入节点会用到了这个吗，所有节点向新加入节点发送以往的实例
@@ -2202,21 +2225,26 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         }
     }
 
-    // TODO: 2023/7/23  当Leader宕机立马进行Leader选举
+
     /**
      * 当向外连接断掉时的操作，发出删除节点的消息
      * */
     private void uponOutConnectionDown(OutConnectionDown event, int channel) {
         logger.warn(event);
+        //建立连接列表中去除指定元素
         establishedConnections.remove(event.getNode());
-
+        // TODO: 2023/7/23  当Leader宕机立马进行Leader选举，先看看是否可行，如果恢复时间长，先设置Leader超时2s
         if (membership.contains(event.getNode())) {
+            // 设置重连时钟
             setupTimer(new ReconnectTimer(event.getNode()), RECONNECT_TIME);
             if (amQuorumLeader)//若是leader,触发删除节点操作
                 uponMembershipOpRequestMsg(new MembershipOpRequestMsg(MembershipOp.RemoveOp(event.getNode())),
                         self, getProtoId(), peerChannel);
-            else if (supportedLeader()!=null && supportedLeader().equals(event.getNode()))
-                lastLeaderOp = 0;// 强制进行leader选举
+            else if (supportedLeader()!=null && supportedLeader().equals(event.getNode())){
+                lastLeaderOp = 0;// 强制进行leader选举 
+                // TODO: 2023/7/31 Leader超时设置的是3秒，是不是还能改进
+                //  在设置第二次重连，前链节点直接进入选举状态即直接进入Leader时钟超时的处理函数
+            }
         }
     }
     
@@ -2246,24 +2274,25 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     }
     //无实际动作
     private void uponInConnectionDown(InConnectionDown event, int channel) {
-        logger.info(event);
+        if (logger.isDebugEnabled()){
+            logger.debug(event);
+        }
     }
 
 
-    
-    
 
 
 
-    // todo 正因为这样在执行删除操作时，因进行 可能取消删除某节点操作  后面又添加这节点操作
-    //  maybeCancelPendingRemoval   maybeAddToPendingRemoval
-    //  因为新leader的选举成功  特别是消息的重发时，因为term变了，还得接受这个消息
-    //  对删除消息可能要重复执行
+
     
-    // 因为 maybeAddToPendingRemoval()方法实际改变了节点的排布情况
+
+    //第一种情况：在对于新加入节点时，可能需要这些操作，新节点得到的成员列表和系统中的不一致的情况
+    //第二种情况： 新旧Leader更换之后，重新执行以往的删除操作，
+    //在接收一些删除节点操作的实例时，先进行可能移除
+    //在删除操作时，先进行标记，后进行删除：若删除的是前链节点，需要将后链首节点与要删除的节点互换位置
+
     
-    
-    //  Utils   工具方法
+    //  ------------Utils-------工具方法
     /**
      * 先取消要删除的节点，将删除节点加入节点列表
      * */
@@ -2274,7 +2303,9 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                 membership.cancelPendingRemoval(o.affectedHost);
         }
     }
-
+    
+    
+    //  因为 maybeAddToPendingRemoval()方法对于前链节点实际改变了节点的排布情况
     /**
      * 将要删除节点重新加入要删除列表
      * */
@@ -2288,14 +2319,14 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
 
 
     /**
-     * 返回当前实例的leader
+     * 返回当前节点所支持的leader
      * */
     private Host supportedLeader() {
         return currentSN.getValue().getNode();
     }
     
     
-    // 用到这里的应该是prepare  prepareOk   accept   electionok 几种消息  
+    // 用到这里的应该是prepare  prepareOk  accept ack  electionok 几种消息,都是发送对应节点的Control层，所以使用sendMessage()的包含两个参数的用法
     /**
      * 发送消息给自己和其他主机
      */
@@ -2303,8 +2334,12 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         if (msg == null || destination == null) {
             logger.error("null: " + msg + " " + destination);
         } else {
-            if (destination.equals(self)) deliverMessageIn(new MessageInEvent(new BabelMessage(msg, (short)-1, (short)-1), self, peerChannel));
-            else sendMessage(msg, destination);
+            if (destination.equals(self)) {
+                deliverMessageIn(new MessageInEvent(new BabelMessage(msg, (short)-1, (short)-1), self, peerChannel));     
+            }
+            else{
+                sendMessage(msg, destination);// 发送至Control层  
+            }
         }
     }
 }

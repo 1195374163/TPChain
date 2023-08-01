@@ -79,7 +79,7 @@ public class Membership {
     }
     
     
-    // 根据索引判断某个节点是否在链中
+    // 根据索引判断某个节点是否在链中,在连接成功、失败、连接断开的事件中使用这个方法
     public boolean contains(Host host) {
         return indexOf(host) >= 0;
     }
@@ -330,10 +330,10 @@ public class Membership {
     
     
     
-    //在对于新加入节点时，可能需要这些操作
+    //第一种情况：在对于新加入节点时，可能需要这些操作，新节点得到的成员列表和系统中的不一致的情况
+    //第二种情况： 新旧Leader更换之后，重新执行以往的删除操作，
     //在接收一些删除节点操作的实例时，先进行可能移除
-    //在删除操作时，先进行标记，后进行删除
-    //若删除的是前链节点，需要将后链首节点与要删除的节点互换位置
+    //在删除操作时，先进行标记，后进行删除：若删除的是前链节点，需要将后链首节点与要删除的节点互换位置
     public void addToPendingRemoval(Host affectedHost) {
         //不管是前链还是后链，都要将受影响节点加入 待移除列表中
         boolean add = pendingRemoval.add(affectedHost);
@@ -349,8 +349,8 @@ public class Membership {
             }
             //用原后链链首替换要删除的元素 
             frontChain.set(removePosition, head);
-            backChain.remove(head);//后链移除原链首
             
+            backChain.remove(head);//后链移除原链首
             //将要删除节点添加到后链末尾
             backChain.add(affectedHost);
             
@@ -367,6 +367,7 @@ public class Membership {
             backChain.remove(affectedHost);
             //将待移除节点放入后链末尾
             backChain.add(affectedHost);
+            
             // 对索引进行清理
             indexMap.clear();
             frontIndexMap.clear();
