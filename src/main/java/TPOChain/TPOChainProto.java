@@ -973,8 +973,9 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             nextOK =newnextok;
             logger.info("New nextok connected: " + nextOK.getAddress());
             // TODO: 2023/8/2 转发所有ack->accept的全局排序日志
-            
-            
+            for (int i = highestAcknowledgedInstanceCl + 1; i <= highestAcceptedInstanceCl; i++) {
+                forwardCL(globalinstances.get(i));
+            }
         }
         // TODO: 2023/8/2   因为是全连接，当换Nextok不会调用uponoutConnnectionup()即自动转发ack->accept的消息，需要手动进行转发ack
     }
