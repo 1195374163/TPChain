@@ -5,10 +5,7 @@ import TPOChain.messages.AcceptAckMsg;
 import TPOChain.messages.AcceptMsg;
 import TPOChain.messages.OrderMSg;
 import TPOChain.messages.UnaffiliatedMsg;
-import TPOChain.notifications.FrontChainNotification;
-import TPOChain.notifications.InitializeCompletedNotification;
-import TPOChain.notifications.LeaderNotification;
-import TPOChain.notifications.ThreadidamFrontNextFrontNextBackNotification;
+import TPOChain.notifications.*;
 import TPOChain.timers.FlushMsgTimer;
 import TPOChain.timers.ReconnectDataTimer;
 import TPOChain.timers.ReconnectTimer;
@@ -180,8 +177,9 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
      * java中net框架所需要的数据结构
      */
     private EventLoopGroup workerGroup;
-
     
+    //由Control层控制，在uponOutConnection中使用
+    private TPOChainProto.State state;
     
     public TPOChainData(Properties props,short index, EventLoopGroup workerGroup) throws UnknownHostException {
         super(PROTOCOL_NAME+index, (short)(PROTOCOL_ID+index) /*, new BetterEventPriorityQueue()*/);
@@ -249,7 +247,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         subscribeNotification(LeaderNotification.NOTIFICATION_ID, this::onLeaderChange);
         subscribeNotification(FrontChainNotification.NOTIFICATION_ID, this::onFrontChainNotification);
         subscribeNotification(InitializeCompletedNotification.NOTIFICATION_ID, this::onInitializeCompletedNotification);
-               
+        subscribeNotification(StateNotification.NOTIFICATION_ID, this::onStateNotification);       
         
         
         // 注册通道事件
@@ -561,7 +559,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
                 hashSetAcceptNode.remove(ackHost);
             }
         }
-
+        // TODO: 2023/8/2 只有这个节点是这条通道的历来使用者，才能使用这条通道发送ack信息 
         // FIXME: 2023/7/19 考虑故障之后，考虑将闹钟要表示是哪个节点的刷新信息
         //这里设置一个定时器,发送acceptack,一段时间没有后续要发的
         // 在发送新实例时在sendnextaccpt取消如果当前节点等于消息的发送节点,再设立闹钟
@@ -610,7 +608,12 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         selfRuntimeConfigure=hostConfigureMap.get(selfInetAddress);
         selfInstanceMap=instances.get(selfInetAddress);
     }
-
+    
+    // 接收control层的状态更改
+    protected void onStateNotification(StateNotification notification,short emitterID){
+        state=notification.getState();
+    }
+    
     //在前链节点和后链节点有改动时调用，初始操作时也视为成员发生改动
     protected  void onFrontChainNotification(FrontChainNotification notification,short emitterID){
         //logger.info("接收来的通知是"+notification.getFrontChain()+notification.getBackchain());
@@ -744,6 +747,11 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
   
         if (peer.equals(nextok)){
             nextokConnected=true;
+            logger.info("already Connected to nextok :"+nextok.getAddress());
+            // TODO: 2023/8/2 有三种状态： 在join状态不能转发，那在状态迁移状态下能转发实例
+            // 是新加入节点，因为日志信息为空，所以不能转发
+            if(state == TPOChainProto.State.JOINING)
+                return;
             //应该改为所有的通道的使用者,以往的节点重发
             Iterator<InetAddress> iterator = hashSetAcceptNode.iterator();
             while (iterator.hasNext()) {
@@ -763,7 +771,6 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
                     forward(channelUserInstanceMap.get(i),channelUser);
                 }
             }
-            logger.info("already Connected to nextok :"+nextok.getAddress());
         }
     }
 
