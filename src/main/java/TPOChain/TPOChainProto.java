@@ -909,7 +909,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         lastAcceptTimeCl = 0;
         
         
-        //上面的都是旧消息，下面是新加入的消息需要传播
+        //上面的都从系统中收集是旧消息，下面是新加入的消息需要传播
         
         //这里的暂存的成员消息都是添加节点,只有在系统中处于选举状态，这个才有意义，
         /**
@@ -921,15 +921,15 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                 sendNextAcceptCL(nextOp);
             } 
         }
-        // TODO: 2023/8/2 下面存储的数据结构不是排序请求,应该删除
+        // 下面存储的数据结构不是排序请求,应该删除
         /**
         * 发送暂存的的排序消息
         * */
-        if (! waitingAppOps.isEmpty()){
-            while ((nextOp = waitingAppOps.poll()) != null) {
-                sendNextAcceptCL(nextOp);
-            }
-        }
+        //if (! waitingAppOps.isEmpty()){
+        //    while ((nextOp = waitingAppOps.poll()) != null) {
+        //        sendNextAcceptCL(nextOp);
+        //    }
+        //}
     }
     
     // 在成功选举后，发送选举成功消息
@@ -938,12 +938,13 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             logger.debug("收到选举成功消息"+msg + " from:" + from);
         }
         setNewInstanceLeader(msg.iN, msg.sN);
+        // 向
         triggerLeaderChange();
         //因为Leader已经选举出来，所以可以生成逻辑控制链 
         changeLogicChain();
     }
     
-    // TODO: 2023/8/2 在Leader更新成功的 
+    // TODO: 2023/8/2 在Leader更新成功调用， 在节点被删除  被添加处使用
     /**
      * 每当Leader发生变化或删除或添加节点时调用这个
      */
@@ -955,11 +956,11 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             int index=(indexleader+i)%frontChain.size();
             members.add(fronttemp.get(index));
         }
-        // 这个不是不包含标记节点的后链
+        // 这个是不包含标记删除节点的后链
         List<Host> backtemp=membership.getBackChain();
         members.addAll(backtemp);
-
-
+        
+        
         //--------------重新生成逻辑链之后要改变nextok的连接
         int indexself=members.indexOf(self);
         Host newnextok=members.get((indexself+1)%members.size());
@@ -972,18 +973,22 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             //Update and open to new writesTo
             nextOK =newnextok;
             logger.info("New nextok connected: " + nextOK.getAddress());
-            // TODO: 2023/8/2 转发所有ack->accept的全局排序日志
+
+            // 因为是全连接，当nextok更换时不会调用uponoutConnnectionup()即自动转发ack->accept的消息，需要手动进行转发ack
+            if (state==State.JOINING){
+                return;
+            }// 转发所有ack->accept的全局排序日志到nextok节点 
             for (int i = highestAcknowledgedInstanceCl + 1; i <= highestAcceptedInstanceCl; i++) {
                 forwardCL(globalinstances.get(i));
             }
         }
-        // TODO: 2023/8/2   因为是全连接，当换Nextok不会调用uponoutConnnectionup()即自动转发ack->accept的消息，需要手动进行转发ack
     }
     
     /**
      * 处理leader和其他节点呼吸事件
      * */
     private void onNoOpTimer(NoOpTimer timer, long timerId) {
+        //设置时钟的触发时间，但在内部使用if判断才执行对应指令
         if (amQuorumLeader) {
             assert waitingAppOps.isEmpty() && waitingMembershipOps.isEmpty();
             if (System.currentTimeMillis() - lastAcceptTimeCl > NOOP_SEND_INTERVAL)
@@ -1008,6 +1013,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      * */
     // 不需要连接nextokfront和nextokBack节点需要的因为leader
     private void triggerMembershipChangeNotification() {
+        // TODO: 2023/8/2  可以设置固定的后链与对应的前链节点挂载，还是在Leader选举之后新的后链重新挂载前链的非Leader节点 
         //调用这里说明supportleader肯定不为null
         Host  host=membership.appendFrontChainNode(self,supportedLeader());
         //触发前链时附加一个多少前链标记 
