@@ -680,7 +680,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         Host notleader=notification.getLeader();
         //Writes to changed
         if (leader == null || !notleader.equals(leader)) {
-            //Close old writesTo
+            //Close old writesTo    为什么是不等于 self，因为需要关闭连接
             if (leader != null && !leader.getAddress().equals(self.getAddress())) {
                 canHandleQequest = false;
                 closeConnection(leader, peerChannel);

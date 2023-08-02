@@ -206,6 +206,9 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      * 加入节点时需要的一些配置
      * */
 
+    // TODO: 2023/8/2   新加入节点也要 申请一份局部日志 和他的 局部日志表，先判断是否已经存在：出现这种情况是 被删除节点重新加入集群
+    //   在leader宕机时，只是前链节点转发新的客户端消息不能进行，老消息可以继续进行
+    
     /**
      * 在节点加入系统中的那个实例
      */
@@ -214,7 +217,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     private long stateTransferTimer = -1;
 
     // TODO: 2023/7/21   新加入节点除了获取系统的状态，还要获取系统的membership，以及前链节点，以及哪些节点正在被删除状态
-    //在joinsuccessMsg添加这些信息：添加状态
+    //  在joinsuccessMsg添加这些信息：添加状态
 
 
     // TODO: 2023/7/21 除了状态还有日志从execute——>ack的实例(局部日志和全局日志)
@@ -294,35 +297,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     
     private  List<InetAddress>  frontChain=new ArrayList<>();
     private  List<InetAddress>  backChain=new ArrayList<>();
-    //todo 以消息的投票数决定发到下一个前链节点(少于F+1)，还是发往后链节点(>=F+1)
-    // 在commandleader被替换时注意(即进行mark之后)，断开前的那个节点要往新的节点以及ack到accept的
-    // 全局日志，以及所有局部日志，重发ack信息
 
 
-    //todo
-    // 删除节点时，进行了标记，那么在标记后会发生什么？特别是删除的前链，会做什么？
-    // 除了因为故障死机，还有因为网络堵塞，没连上集群节点的情况
-
-
-    //todo
-    // 若在链尾节点，中发现一个分发消息的发送者不在集群中，那么对全体广播ack，对消息进行一个确认
-    // 全部节点对于这个消息进行ack
-
-
-    //todo
-    // 新加入节点会在刚和前末尾节点连接时，前末尾节点检测输出口，前末尾节点会进行所有消息的转发
-    // 若新加入节点是后链的链首
-    // 若新加入节点是后链的其他节点
-    // 不会出现新加入节点是前链的情况，因为那是因为系统节点不满足F+1已经终止了
-    // 新加入节点，在加入时，先取得状态还是先取得前继节点发来的消息
-
-
-    //todo  
-    // 新加入节点也要 申请一份局部日志 和他的 局部日志表
-    // 先判断是否已经存在：出现这种情况是 被删除节点重新加入集群
-
-
-    //todo 在leader宕机时，只是前链节点转发新的客户端消息不能进行，老消息可以继续进行
 
 
     
@@ -350,15 +326,18 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     //leader使用，即使发生leader交换时，由新leader接棒：由新leader根据所有节点的accept信息来推断出lastAcceptSent
     private int lastAcceptSentCl = -1;
 
+    
 
-    // TODO: 2023/7/31   加入一个执行锁:为什么加入这个，因为添加状态需要读取状态，而执行线程需要更新状态
-    //  做法：将锁放入最小的执行单元，因为执行线程可能等待消息队列而阻塞整个线程，锁一直释放不了
+    // 加入一个执行锁:为什么加入这个，因为添加状态需要读取状态，而执行线程需要更新状态，两者冲突
+    // 做法：将锁放入最小的执行单元，因为执行线程可能等待消息队列而阻塞整个线程，锁一直释放不了，将锁放入最小的单元，避免
     private final Object  executeLock=new Object();
     
-    // decide的值的变化，避开对一个值的加锁
-    private BlockingQueue<Integer> olddecidequeue= new LinkedBlockingQueue<>();
+    
+    
     //执行实例守护线程
     private Thread executionSortThread;
+    // decide的值的变化，避开对一个值的加锁
+    private BlockingQueue<Integer> olddecidequeue= new LinkedBlockingQueue<>();
     //全局实例的队列
     private BlockingQueue<InstanceStateCL> olderInstanceClQueue= new LinkedBlockingQueue<>();
     
@@ -370,7 +349,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     private BlockingQueue<Integer> olddackqueue= new LinkedBlockingQueue<>();
     private BlockingQueue<Integer> olddexecutequeue= new LinkedBlockingQueue<>();
 
-    // TODO: 2023/7/26 Leader宕机也需要向Data层发送通知， 或者不需要，因为Data层连接Leader的通道已经断开，不需要外部响应 
+    //Leader宕机也需要向Data层发送通知， 或者不需要，因为Data层连接Leader的通道已经断开，不需要外部响应 
     
     /**
      *构造函数
@@ -596,7 +575,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         this.executionGabageCollectionThread.start();
     }
 
-    /**改变物理链,将前链和后链节点传递到Data层
+    /**
+     * 改变物理链,将前链和后链节点传递到Data层
     */
     private void  changeDataFrontAndBackChain(){
         // 清空前链原来的内容
@@ -616,6 +596,40 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //触发Data层的列表改变
         triggerFrontChainChange();
     }
+
+
+    /**
+     * 每当Leader发生变化或删除或添加节点时调用这个
+     */
+    private  void changeLogicChain(){
+        Host leader=supportedLeader();
+        int indexleader=membership.frontIndexOf(leader);
+        List<Host> fronttemp=membership.getFrontChain();
+        for (int i=0;i<frontChain.size();i++){
+            int index=(indexleader+i)%frontChain.size();
+            members.add(fronttemp.get(index));
+        }
+        // 这个不是不包含标记节点的后链
+        List<Host> backtemp=membership.getBackChain();
+        members.addAll(backtemp);
+        
+        
+        //--------------重新生成逻辑链之后要改变nextok的连接
+        int indexself=members.indexOf(self);
+        Host newnextok=members.get((indexself+1)%members.size());
+        if (nextOK == null || !nextOK.equals(newnextok)) {
+            // 因为control层本身是全连接，不能关闭也不能开启(因为本身是开启)，nextok节点
+            //当满足这个条件，
+            if (nextOK != null && !nextOK.getAddress().equals(self.getAddress())) {
+                nextOkConnnected = false;
+            }
+            //Update and open to new writesTo
+            nextOK =newnextok;
+            logger.info("New nextok connected: " + nextOK.getAddress());
+        }
+        // TODO: 2023/8/2   因为是全连接，当换Nextok不会调用uponoutConnnectionup()即自动转发ack->accept的消息，需要手动进行转发ack
+    }
+    
     
     
     /**
