@@ -99,7 +99,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     private TPOChainProto.State state;
 
     /**
-     * 这是对系统全体成员的映射包含状态的成员列表，随时可以更新
+     * 这是对系统全体成员的映射包含状态的成员列表(即物理链)，随时可以更新
      * */
     private Membership membership;
 
@@ -118,14 +118,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      * */
     private final Host self;
     
-    // 打算废弃物理链，改用逻辑链
-    /**
-     * 消息的下一个节点
-     * */
-    private Host nextOkFront;
-    private Host nextOkBack;
-    
-    
     //主要是重新配前链，根据选定的Leader，从Membership生成以Leader为首节点的前链节点之后，之后依次接入后链节点
     private List<Host> members;
     // nextOKFront和nextOkBack是静态的，，而nextOk是Leader选定之后，nextOK从nextOKFront和NextOkBack中选定一个
@@ -133,27 +125,14 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     //标记nextOk节点是否连接
     private boolean  nextOkConnnected=false;
 
-    
-    
-
-    // TODO: 2023/7/31   在成为候选者之后有新Leader比自身大那么暂存的排序命令需要转发至新Leader,而且只能附加在Prepare
-    //    新Leader从prepareOk消息其中拿出  暂存的排序 和  已经排完序的accept消息
-    //打算废弃？不能废弃，因为 在系统处于状态不稳定(即无leader时)时，暂存一些重要命令，如其他节点发过来的排序命令
+    // 打算废弃物理链，改用逻辑链
     /**
-     * 在竞选leader时即候选者时暂存的命令
+     * 消息的下一个节点
      * */
-    private final Queue<AppOpBatch> waitingAppOps = new LinkedList<>();
-    
-    
-    //成员添加命令呢？ 删除命令，这个旧领导可以不传给新leader，因为新Leader在当选成功后，会重新删掉已经断开连接的节点
-    // TODO  关于添加成员的命令也需要转发，删除成员的命令不需要转发了，也附带在prepare之中
-    private final Queue<MembershipOp> waitingMembershipOps = new LinkedList<>();
-    
-    
-    
-    
-    
-    
+    private Host nextOkFront;
+    private Host nextOkBack;
+
+
     
 
     /**
@@ -170,11 +149,11 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      * 保持leader的心跳信息，用系统当前时间减去上次时间
      * */
     private long lastAcceptTimeCl;
-    
+
     // 还有一个field ： System.currentTimeMillis(); 隐含了系统的当前时间
-    
-    
-    
+
+
+
     /**
      *计时 非leader前链节点计算与leader之间的呼吸
      * */
@@ -183,22 +162,28 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     private long lastLeaderOp;
 
     // 还有一个field ： System.currentTimeMillis(); 隐含了系统的当前时间
+
+    
+
     
     
-    
+
+
+
+    // TODO: 2023/7/31   在成为候选者之后有新Leader比自身大那么暂存的排序命令需要转发至新Leader,而且只能附加在Prepare
+    //  新Leader从prepareOk消息其中拿出  暂存的排序 和  已经排完序的accept消息
+    //打算废弃？不能废弃，因为 在系统处于状态不稳定(即无leader时)时，暂存一些重要命令，如其他节点发过来的排序命令
     /**
-     * 标记是否为前段节点，代表者可以发送command，并向leader发送排序
+     * 在竞选leader时即候选者时暂存的命令
      * */
-    //private boolean amFrontedNode;
-
-    /**
-     * 标记前链节点能否开始处理客户端的请求：在连接到Leader之后开始能处理leader消息
-     * */
-    //private boolean canHandleQequest;
+    private final Queue<AppOpBatch> waitingAppOps = new LinkedList<>();
     
     
-
-
+    //成员添加命令呢？ 删除命令，这个旧领导可以不传给新leader，因为新Leader在当选成功后，会重新删掉已经断开连接的节点
+    // TODO: 2023/8/2 关于添加成员的命令也需要转发，删除成员的命令不需要转发了，也附带在prepare之中
+    private final Queue<MembershipOp> waitingMembershipOps = new LinkedList<>();
+    
+    
     
     
 
@@ -296,7 +281,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     //--------------传递给下层Data层的成员指标，代表Data端的主机映射
     
     private  List<InetAddress>  frontChain=new ArrayList<>();
-    private  List<InetAddress>  backChain=new ArrayList<>();
+    private  List<InetAddress>  backChain =new ArrayList<>();
 
 
 
