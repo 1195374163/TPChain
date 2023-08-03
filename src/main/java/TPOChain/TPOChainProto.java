@@ -333,7 +333,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     private Thread executionGabageCollectionThread;
     private BlockingQueue<Integer> olddackqueue= new LinkedBlockingQueue<>();
     private BlockingQueue<Integer> olddexecutequeue= new LinkedBlockingQueue<>();
-
+    
     //Leader宕机也需要向Data层发送通知， 或者不需要，因为Data层连接Leader的通道已经断开，不需要外部响应 
     
     /**
@@ -356,10 +356,10 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         nextOK=null;
         nextOkConnnected=false;
         
-        // TODO: 2023/8/2 将要删除下面这两个 
+
         //不管是排序还是分发消息：标记下一个节点
-        nextOkFront =null;
-        nextOkBack=null;
+        //nextOkFront =null;
+        //nextOkBack=null;
         
         
         
@@ -470,8 +470,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         registerTimerHandler(ForgetStateTimer.TIMER_ID, this:: onForgetStateTimer);
        
         
-                
-        
 
         //接收从front的   读请求
         registerRequestHandler(SubmitReadRequest.REQUEST_ID, this::onSubmitRead);
@@ -482,27 +480,32 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         registerReplyHandler(DeliverSnapshotReply.REPLY_ID, this::onDeliverSnapshot);
 
         
-        //初始化执行和回收线程
-        this.executionSortThread = new Thread(this::execLoop,  "---execute" );
-        this.executionGabageCollectionThread=new Thread(this::gcLoop,"---gc");
-        
         // 向Data层通知当前节点的状态
         triggerStateChange();
-        // TODO: 2023/8/1 可以在这里通知data层节点的状态 
+     
         //根据初始设置：新加入节点是激活的还是等待加入的
         if (state == TPOChainProto.State.ACTIVE) {
-            
             if (!seeds.contains(self)) {
                 logger.error("Non seed starting in active state");
                 throw new AssertionError("Non seed starting in active state");
             }
             //设置初始成员membership
             setupInitialState(seeds, -1);
+            
+            //在节点状态为Active 之后初始化执行和回收线程
+            this.executionSortThread = new Thread(this::execLoop,  "---execute" );
+            this.executionGabageCollectionThread=new Thread(this::gcLoop,"---gc");
         } else if (state == TPOChainProto.State.JOINING) {
             joinTimer = setupTimer(JoinTimer.instance, 1000);
+            // TODO: 2023/8/3 在加入成功之后进行开启执行线程和回收线程 
         }
         logger.info("TPOChainProto: " + membership + " qs " + QUORUM_SIZE);
     }
+    
+    
+    
+    
+    
     
     // --------------------------触发Leader选举
     
@@ -514,11 +517,11 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //这里根据传进来的顺序， 已经将前链节点和后链节点分清楚出了
         membership = new Membership(members, QUORUM_SIZE);
 
-        // TODO: 2023/8/2 废弃下面这个 
+
         // 对排序的下一个节点准备，打算在这里
-        nextOkFront =membership.nextLivingInFrontedChain(self);
-        nextOkBack=membership.nextLivingInBackChain(self);
-        logger.info("setupInitialState()方法中nextOkFront是"+nextOkFront+";nextOkBack是"+nextOkBack);
+        //nextOkFront =membership.nextLivingInFrontedChain(self);
+        //nextOkBack=membership.nextLivingInBackChain(self);
+        //logger.info("setupInitialState()方法中nextOkFront是"+nextOkFront+";nextOkBack是"+nextOkBack);
         
         
         //next:因为需要全连接作为成员管控，发送prepare  prepareok   electionok消息
@@ -599,13 +602,12 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         lastLeaderOp = System.currentTimeMillis();
         
         
-        // TODO: 2023/8/2 删去nextokFront和nextOkBack节点 
         //对下一个消息节点进行重设 
-        nextOkFront =membership.nextLivingInFrontedChain(self);
-        nextOkBack  =membership.nextLivingInBackChain(self);
-        if (logger.isDebugEnabled()){
-            logger.debug("在frontChainNodeAction()结尾处nextOkFront是"+nextOkFront+"; nextOkBack是"+nextOkBack);
-        }
+        //nextOkFront =membership.nextLivingInFrontedChain(self);
+        //nextOkBack  =membership.nextLivingInBackChain(self);
+        //if (logger.isDebugEnabled()){
+        //    logger.debug("在frontChainNodeAction()结尾处nextOkFront是"+nextOkFront+"; nextOkBack是"+nextOkBack);
+        //}
     }
     
     
@@ -1261,7 +1263,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      *标记要删除的节点
      * */
     private void markForRemoval(InstanceStateCL inst) {
-        // TODO: 2023/8/3  
+        // TODO: 2023/8/3  应该修改删除物理链   从而触发逻辑链的修改
+        
         
     }
     
@@ -1381,10 +1384,12 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             triggerMembershipChangeNotification();
             triggerFrontChainChange();
             //对next  重新赋值
-            nextOkFront=membership.nextLivingInFrontedChain(self);
-            nextOkBack=membership.nextLivingInBackChain(self);
-
-            openConnection(target);
+            //nextOkFront=membership.nextLivingInFrontedChain(self);
+            //nextOkBack=membership.nextLivingInBackChain(self);
+            // TODO: 2023/8/3 对nextOk重新赋值
+            
+            
+            openConnection(target);//
 
             if (!hostConfigureMap.containsKey(target)){
                 //添加成功后，需要添加一新加节点的局部日志表 和  局部配置表
@@ -1630,24 +1635,16 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             //对节点的状态改为join状态
             state = TPOChainProto.State.JOINING;
             joinTimer = setupTimer(JoinTimer.instance, 1000);
-            //通知Data的状态变化
+            //通知Data的状态变化，
             triggerStateChange();
         }
+        
     }
     // 失去前链节点
     private  void  cancelfrontChainNodeAction(){
-        //取消拥有了设置选举leader的资格
-        //取消设置领导超时处理
+        //取消拥有了设置选举leader的资格，取消设置领导超时处理
         cancelTimer(leaderTimeoutTimer)   ;
         lastLeaderOp = System.currentTimeMillis();
-        
-        //标记前链节点不能处理
-    
-        //标记为后段节点
-        //amFrontedNode = false;
-        
-        //取消作为前链节点的定时刷新时钟 
-        //cancelTimer(frontflushMsgTimer); 
     }
     
     
@@ -1674,18 +1671,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             logger.warn("Unexpected JoinTimer");
     }
 
-    //// 下面这些功能在设置leader处实现
-    ///**
-    // * 成为前链节点，这里不应该有cl后缀
-    // * */
-    //private  void   becomeFrontedChainNode(){
-    //    logger.info("I am FrontedChain now! ");
-    //    //标记为前段节点
-    //    amFrontedNode = true;
-    //    frontflushMsgTimer = setupPeriodicTimer(FlushMsgTimer.instance, NOOP_SEND_INTERVAL, Math.max(NOOP_SEND_INTERVAL / 3,1));
-    //    //这里不需要立即发送noop消息
-    //    lastSendTime = System.currentTimeMillis();
-    //}
+
 
     //TODO  新加入节点对系统中各个分发节点也做备份，
     // 新加入节点执行这个操作
@@ -1699,8 +1685,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
 
         //nextOkCl = membership.nextLivingInChain(self);
         // 对排序的下一个节点准备，打算在这里
-        nextOkFront =membership.nextLivingInFrontedChain(self);
-        nextOkBack=membership.nextLivingInBackChain(self);
+        //nextOkFront =membership.nextLivingInFrontedChain(self);
+        //nextOkBack=membership.nextLivingInBackChain(self);
         //next
         members.stream().filter(h -> !h.equals(self)).forEach(this::openConnection);
         //对全局的排序消息进行配置  -1
@@ -1813,6 +1799,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                 // 在此处可以对队头元素进行处理，可以根据具体需求编写处理逻辑
                 //bufferedOps.forEach(o -> triggerNotification(new ExecuteBatchNotification(o.getBatch())));
             }
+            // TODO: 2023/8/3 在状态填充完毕，在开启执行线程的回收线程的开启 
             // TODO: 2023/5/17 bufferedOPs的清空  
             /*
             highestExecuteInstanceCl +=bufferedOps.size();
