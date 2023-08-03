@@ -121,7 +121,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     //主要是重新配前链，根据选定的Leader，从Membership生成以Leader为首节点的前链节点之后，之后依次接入后链节点
     private List<Host> members;
     // nextOKFront和nextOkBack是静态的，，而nextOk是Leader选定之后，nextOK从nextOKFront和NextOkBack中选定一个
-    private Host Head;
+    private Host Head;//使用
     private Host nextOK;
     //标记nextOk节点是否连接
     private boolean  nextOkConnnected=false;
@@ -130,8 +130,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     /**
      * 消息的下一个节点
      * */
-    private Host nextOkFront;
-    private Host nextOkBack;
+    //private Host nextOkFront;
+    //private Host nextOkBack;
 
     
 
@@ -140,6 +140,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      * */
     private boolean amQuorumLeader;
     // TODO: 2023/8/1  amQuorumLeader 会和support Leader不一致吗？
+    //  可能会，因为接收到更高序好的prepare之后， 
     /**
      * leader使用，隔断时间发送no-op命令
      * */
@@ -278,7 +279,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     
     
     
-    //--------------传递给下层Data层的成员指标，代表Data端的主机映射，是物理链
+    //--------------物理链；传递给下层Data层的成员指标，代表Data端的主机映射，
     
     private  List<InetAddress>  frontChain=new ArrayList<>();
     private  List<InetAddress>  backChain =new ArrayList<>();
@@ -334,7 +335,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     private BlockingQueue<Integer> olddackqueue= new LinkedBlockingQueue<>();
     private BlockingQueue<Integer> olddexecutequeue= new LinkedBlockingQueue<>();
     
-    //Leader宕机也需要向Data层发送通知， 或者不需要，因为Data层连接Leader的通道已经断开，不需要外部响应 
+    //Leader宕机也需要向Data层发送通知， 或者不需要，因为Data层连接Leader的通道已经断开，不需要外部响应(除非Leader没宕机，只是被删除) 
     
     /**
      *构造函数
@@ -394,7 +395,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     @SuppressWarnings("DuplicatedCode")
     @Override
     public void init(Properties props) throws HandlerRegistrationException, IOException {
-        // 申请一个通道
+        // 申请一个TCP通道
         Properties peerProps = new Properties();
         peerProps.put(TCPChannel.ADDRESS_KEY, props.getProperty(ADDRESS_KEY));
         peerProps.setProperty(TCPChannel.PORT_KEY, props.getProperty(PORT_KEY));
@@ -482,7 +483,13 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         
         // 向Data层通知当前节点的状态
         triggerStateChange();
-     
+
+
+        //在这里只是声明初始化执行和回收线程
+        this.executionSortThread = new Thread(this::execLoop,  "---execute" );
+        this.executionGabageCollectionThread=new Thread(this::gcLoop,"---gc");
+        
+        
         //根据初始设置：新加入节点是激活的还是等待加入的
         if (state == TPOChainProto.State.ACTIVE) {
             if (!seeds.contains(self)) {
@@ -491,10 +498,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             }
             //设置初始成员membership
             setupInitialState(seeds, -1);
-            
-            //在节点状态为Active 之后初始化执行和回收线程
-            this.executionSortThread = new Thread(this::execLoop,  "---execute" );
-            this.executionGabageCollectionThread=new Thread(this::gcLoop,"---gc");
         } else if (state == TPOChainProto.State.JOINING) {
             joinTimer = setupTimer(JoinTimer.instance, 1000);
             // TODO: 2023/8/3 记得在加入成功之后进行开启执行线程和回收线程 
@@ -517,12 +520,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //这里根据传进来的顺序， 已经将前链节点和后链节点分清楚出了
         membership = new Membership(members, QUORUM_SIZE);
 
-
-        // 对排序的下一个节点准备，打算在这里
-        //nextOkFront =membership.nextLivingInFrontedChain(self);
-        //nextOkBack=membership.nextLivingInBackChain(self);
-        //logger.info("setupInitialState()方法中nextOkFront是"+nextOkFront+";nextOkBack是"+nextOkBack);
-        
         
         //next:因为需要全连接作为成员管控，发送prepare  prepareok   electionok消息
         members.stream().filter(h -> !h.equals(self)).forEach(this::openConnection);
@@ -932,7 +929,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     /**
      * 在成功选举后，发送选举成功消息
      */
-    private void uponElectionSuccessMsg(ElectionSuccessMsg msg, Host from, short sourceProto, int channel) {
+    private  void uponElectionSuccessMsg(ElectionSuccessMsg msg, Host from, short sourceProto, int channel) {
         if (logger.isDebugEnabled()){
             logger.debug("收到选举成功消息"+msg + " from:" + from);
         }
@@ -987,7 +984,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     /**
      * 处理leader和其他节点呼吸事件
      * */
-    private void onNoOpTimer(NoOpTimer timer, long timerId) {
+    private  void onNoOpTimer(NoOpTimer timer, long timerId) {
         //设置时钟的触发时间，但在内部使用if判断才执行对应指令
         if (amQuorumLeader) {
             assert waitingAppOps.isEmpty() && waitingMembershipOps.isEmpty();
@@ -1279,6 +1276,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     /**
      * 转发accept信息给下一个节点或ack到Leader
      * */
+    // 链只是传导排序信息，最后ack发给Leader，是新Leader还是
     private void forwardCL(InstanceStateCL inst) {
 
         // TODO: 2023/8/3 这里使用nextOk节点，不再使用nextoKfront 和nextOkBack
@@ -1604,6 +1602,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     
     
     
+    
 
     // TODO: 2023/6/2 新加入节点如果局部配置信息有新加入节点,应该重新导入,
     //  他的lastsent需要等于accept信息
@@ -1742,6 +1741,9 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //这里根据传进来的顺序， 已经将前链节点和后链节点分清楚出了
         membership = new Membership(members, QUORUM_SIZE);
 
+        // TODO: 2023/8/3 应该在这里对配置信息进行更新比如accept  ack  等等序号 
+        
+        
         //nextOkCl = membership.nextLivingInChain(self);
         // 对排序的下一个节点准备，打算在这里
         //nextOkFront =membership.nextLivingInFrontedChain(self);
@@ -2009,6 +2011,9 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                 // TODO: 2023/8/2 是前链节点拉取后链首节点 
                 // TODO: 2023/8/2 所有节点执行将后链首节点代替Leader位置之后再进行选举
                 lastLeaderOp = 0;// 强制进行leader选举
+                // TODO: 2023/8/3 更好的设置一个一次性定时时钟类似LeaderTimout，还是直接触发Leader时钟超时的处理函数
+                //  那么只有进入选举状态
+                
                 // TODO: 2023/7/31 Leader超时设置的是3秒，是不是还能改进
                 //  在设置第二次重连，前链节点直接进入选举状态即直接进入Leader时钟超时的处理函数
             }
