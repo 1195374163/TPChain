@@ -31,7 +31,7 @@ public class RuntimeConfigure {
     public int lastAcceptSent = -1;
 
 
-    // TODO: 2023/8/3 上次给这个节点排序的号  Leader使用，确定排序是不是依次的，不是，那么查看局部日志有没有对应缺少排序的消息，对缺少排序可以补充
+    // TODO: 2023/8/3 上次给这个节点排序的号,  Leader使用，确定排序是不是依次的，不是，那么查看局部日志有没有对应缺少排序的消息，对缺少排序可以补充
     public int  lastOrder=-1;
     
     
@@ -57,7 +57,7 @@ public class RuntimeConfigure {
     
     
     /**
-     * 链尾节点使用:主要后链链尾用来定时向命令的coommandleader发送ack信息
+     * 链尾节点使用:主要后链链尾用来定时向消息的发送方或系统全局发送ack信息
      * */
     
     //  节点在收到这个节点的分发消息的时间

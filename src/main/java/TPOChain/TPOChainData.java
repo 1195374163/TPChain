@@ -350,7 +350,10 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     private RuntimeConfigure selfRuntimeConfigure;
     private Map<Integer, InstanceState>  selfInstanceMap;
 
-    
+    // TODO: 2023/8/3   因为只有在分发和排序都存在才可以执行，若非leader故障
+    //  对非leader的排序消息要接着转发，不然程序执行不了
+    //  所以先分发，后排序
+    //  处理流程先分发后排序，排序可以加上
     
     /**
      * 在当前节点是前链节点时处理，发送 或Noop 或App_Batch信息
