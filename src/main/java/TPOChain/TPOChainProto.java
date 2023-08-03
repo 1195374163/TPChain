@@ -121,6 +121,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     //主要是重新配前链，根据选定的Leader，从Membership生成以Leader为首节点的前链节点之后，之后依次接入后链节点
     private List<Host> members;
     // nextOKFront和nextOkBack是静态的，，而nextOk是Leader选定之后，nextOK从nextOKFront和NextOkBack中选定一个
+    private Host Head;
     private Host nextOK;
     //标记nextOk节点是否连接
     private boolean  nextOkConnnected=false;
@@ -944,13 +945,14 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         changeLogicChain();
     }
     
-    // TODO: 2023/8/2 在Leader更新成功调用， 在节点被删除  被添加处使用
+    // TODO: 2023/8/2 在Leader更新成功调用，缺少调用： 在节点被删除  被添加处使用
     /**
      * 每当Leader发生变化或删除或添加节点时调用这个
      */
     private  void changeLogicChain(){
         Host leader=supportedLeader();
         int indexleader=membership.frontIndexOf(leader);
+        
         List<Host> fronttemp=membership.getFrontChain();
         for (int i=0;i<frontChain.size();i++){
             int index=(indexleader+i)%frontChain.size();
@@ -1056,6 +1058,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
 
     // TODO: 2023/8/1 触发状态改变： data层和control层状态一致，特别在outConnectionUp()中根据这个状态，判断是否转发消息 
     private  void  triggerStateChange(){
+        // TODO: 2023/8/3 除了初始配置，应该在状态更新之后调用
         // 这个不需要序列和反序列化，因为是进程间通信，通知所有的data层的状态
         triggerNotification(new StateNotification(state));
     }
@@ -1068,12 +1071,14 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     //TODO 因为只有在分发和排序都存在才可以执行，若非leader故障
     // 对非leader的排序消息要接着转发，不然程序执行不了
     // 所以先分发，后排序
-    // 处理流程先分发后排序，若分发
+    // 处理流程先分发后排序，排序可以加上
     
     
     
 /**------leader的重新发送排序命令，也可以包括成员添加，删除操作--**/
 
+    // TODO: 2023/8/3 什么时候会出现候选者：因为prepare发过来就相等于候选者，达到多数才属于Leader
+    // 
  
     /**
      *  其他节点的data端发过来OrderMsg信息，在这里接收
@@ -1256,287 +1261,82 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      *标记要删除的节点
      * */
     private void markForRemoval(InstanceStateCL inst) {
-        //MembershipOp op = (MembershipOp) inst.acceptedValue;
-        //// TODO: 2023/5/18  2023年5月18日16:05:09考虑消息的重发：是不是所有消息都要重发，有些可能不受影响 
-        ////   具体来说  哪一个next节点改动就转发对应的消息，不需要全部转发
-        //
-        //// 当删除节点是前链节点
-        //if (membership.frontChainContain(op.affectedHost) ){
-        //    if (!membership.frontChainContain(self)){//是后链
-        //        Host  backTail=membership.getBackChainHead();
-        //        if (backTail.equals(self)){//当前节点是后链链首
-        //            // TODO: 2023/5/18  要进行转换成前链节点标志
-        //            // 标记删除节点
-        //            membership.addToPendingRemoval(op.affectedHost);
-        //            // 修改next节点
-        //            nextOkBack=membership.nextLivingInBackChain(self);
-        //            nextOkFront=membership.nextLivingInFrontedChain(self);
-        //
-        //            //修改成前链节点需要的操作
-        //            //设置时钟
-        //            leaderTimeoutTimer = setupPeriodicTimer(LeaderTimer.instance, LEADER_TIMEOUT, LEADER_TIMEOUT / 3);
-        //            lastLeaderOp = System.currentTimeMillis();
-        //            //标记为前段节点
-        //            amFrontedNode = true;
-        //            //此处有leader时，能处理事务
-        //            canHandleQequest=true;
-        //        }else {// 当前节点是后链非链首
-        //            membership.addToPendingRemoval(op.affectedHost);
-        //            return;
-        //        }
-        //    }else{//当前节点是前链
-        //        if (nextOkFront.equals(op.affectedHost)){//next节点正好是要被删除节点
-        //            membership.addToPendingRemoval(op.affectedHost);
-        //            // TODO: 2023/5/18 应该重发所有到nextOkFront的消息，对于nextOkBack 
-        //            nextOkFront=membership.nextLivingInFrontedChain(self);
-        //            nextOkBack=membership.nextLivingInBackChain(self);
-        //            // 重发可能丢失的消息
-        //            for (int i = highestAcknowledgedInstanceCl + 1; i < inst.iN; i++) {
-        //                forwardCL(globalinstances.get(i));
-        //            }
-        //            Iterator<Map.Entry<Host, Map<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
-        //            while (outerIterator.hasNext()) {
-        //                // 获取外层 Map 的键值对
-        //                Map.Entry<Host, Map<Integer, InstanceState>> outerEntry = outerIterator.next();
-        //                Host host = outerEntry.getKey();
-        //                //Map<Integer, InstanceState> innerMap = outerEntry.getValue();
-        //                for (int i = hostConfigureMap.get(host).highestAcknowledgedInstance + 1; i <=  hostConfigureMap.get(host).highestAcceptedInstance; i++) {
-        //                    short threadid=(short)(membership.frontIndexOf(host)+1);
-        //                    forward(instances.get(host).get(i),threadid);
-        //                }
-        //            }
-        //        }else{//不是自己的next节点
-        //            //Notice 2023/5/18 对于其他不受影响的前链节点，它的nextOkBack也要发生改变 
-        //            membership.addToPendingRemoval(op.affectedHost);
-        //            nextOkBack=membership.nextLivingInBackChain(self);
-        //        }
-        //    }
-        //}else {// 当删除节点是后链节点
-        //    Host  backTail=membership.getBackChainHead();
-        //    if (backTail.equals(op.affectedHost)){//当前删除的是后链链首
-        //        if (membership.frontChainContain(self)){// 当前节点是前链
-        //            // 标记删除节点
-        //            membership.addToPendingRemoval(op.affectedHost);
-        //            // 修改next节点
-        //            nextOkBack=membership.nextLivingInBackChain(self);
-        //            // 重发可能丢失的消息
-        //            for (int i = highestAcknowledgedInstanceCl + 1; i < inst.iN; i++) {
-        //                forwardCL(globalinstances.get(i));
-        //            }
-        //            Iterator<Map.Entry<Host, Map<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
-        //            while (outerIterator.hasNext()) {
-        //                // 获取外层 Map 的键值对
-        //                Map.Entry<Host, Map<Integer, InstanceState>> outerEntry = outerIterator.next();
-        //                Host host = outerEntry.getKey();
-        //                //Map<Integer, InstanceState> innerMap = outerEntry.getValue();
-        //                for (int i = hostConfigureMap.get(host).highestAcknowledgedInstance + 1; i <=  hostConfigureMap.get(host).highestAcceptedInstance; i++) {
-        //                    short threadid=(short)(membership.frontIndexOf(host)+1);
-        //                    forward(instances.get(host).get(i),threadid);
-        //                }
-        //            }
-        //        }else {//当前节点是后链其他节点
-        //            membership.addToPendingRemoval(op.affectedHost);
-        //            return;
-        //        }
-        //    }else {//删除的不是后链链首
-        //        if (membership.frontChainContain(self)){
-        //            return;//若当前节点是前链，不受影响
-        //        }else{//当前节点是后链
-        //            if (nextOkBack.equals(op.affectedHost)){//当next节点是要删除节点
-        //                // 标记此节点
-        //                membership.addToPendingRemoval(op.affectedHost);
-        //                // 修改next节点
-        //                nextOkBack=membership.nextLivingInBackChain(self);
-        //                // 重发可能丢失的消息
-        //                for (int i = highestAcknowledgedInstanceCl + 1; i < inst.iN; i++) {
-        //                    forwardCL(globalinstances.get(i));
-        //                }
-        //                Iterator<Map.Entry<Host, Map<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
-        //                while (outerIterator.hasNext()) {
-        //                    // 获取外层 Map 的键值对
-        //                    Map.Entry<Host, Map<Integer, InstanceState>> outerEntry = outerIterator.next();
-        //                    Host host = outerEntry.getKey();
-        //                    //Map<Integer, InstanceState> innerMap = outerEntry.getValue();
-        //                    for (int i = hostConfigureMap.get(host).highestAcknowledgedInstance + 1; i <=  hostConfigureMap.get(host).highestAcceptedInstance; i++) {
-        //                        short threadid=(short)(membership.frontIndexOf(host)+1);
-        //                        forward(instances.get(host).get(i),threadid);
-        //                    }
-        //                }
-        //            }else {
-        //                membership.addToPendingRemoval(op.affectedHost);
-        //                return;
-        //            }
-        //        }
-        //    }
-        //}
-        //
-        //
-        ////在这里对后链链首元素进行更改：转变成前链节点
-        //if (membership.nextLivingInBackChain(op.affectedHost).equals(self)){
-        //    //拥有了设置选举leader的资格
-        //    //设置领导超时处理
-        //    leaderTimeoutTimer = setupPeriodicTimer(LeaderTimer.instance, LEADER_TIMEOUT, LEADER_TIMEOUT / 3);
-        //    lastLeaderOp = System.currentTimeMillis();
-        //
-        //    //标记为前段节点
-        //    amFrontedNode = true;
-        //    //无leader时，不能处理事务
-        //    canHandleQequest=true;
-        //
-        //    membership.addToPendingRemoval(op.affectedHost);
-        //
-        //
-        //    //对下一个消息节点进行重设 
-        //    nextOkFront =membership.nextLivingInFrontedChain(self);
-        //    nextOkBack=membership.nextLivingInBackChain(self);
-        //
-        //    for (int i = highestAcknowledgedInstanceCl + 1; i < inst.iN; i++) {
-        //        forwardCL(globalinstances.get(i));
-        //    }
-        //
-        //    Iterator<Map.Entry<Host, Map<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
-        //    while (outerIterator.hasNext()) {
-        //        // 获取外层 Map 的键值对
-        //        Map.Entry<Host, Map<Integer, InstanceState>> outerEntry = outerIterator.next();
-        //        Host host = outerEntry.getKey();
-        //        //Map<Integer, InstanceState> innerMap = outerEntry.getValue();
-        //        //System.out.println("Host: " + host);
-        //        for (int i = hostConfigureMap.get(host).highestAcknowledgedInstance + 1; i <=  hostConfigureMap.get(host).highestAcceptedInstance; i++) {
-        //            short threadid=(short)(membership.frontIndexOf(host)+1);
-        //            forward(instances.get(host).get(i),threadid);
-        //        }
-        //    }
-        //    return;
-        //}else {
-        //    membership.addToPendingRemoval(op.affectedHost);
-        //}
-        //
-        //
-        //// 前链节点 nextOkFront  和   nextOkBack  都不为空
-        //// 后链节点非链尾的话  nextOkFront为空  nextOkBack不为空
-        //// 后链链尾的话，nextOkFront  nextOkBack 都为空
-        //
-        //
-        ////一个节点故障只会影响nextOkFront nextOkBack 其中之一，不会两个都影响
-        //
-        //// 下面节点只在前链非leader触发
-        //// 对当前之前的消息进行转发，不包含当前信息，因为之后的forward会对当前的消息进行转发
-        //if (nextOkFront!=null && nextOkFront.equals(op.affectedHost)){
-        //    nextOkFront=membership.nextLivingInFrontedChain(self);
-        //    // 对排序信息进行重发
-        //    // 为什么是ack+1 开始，因为若ack序号的信息没有发往下一个节点，
-        //    // 就不会有对应节点的ack信息
-        //    for (int i = highestAcknowledgedInstanceCl + 1; i < inst.iN; i++) {
-        //        forwardCL(globalinstances.get(i));
-        //    }
-        //    // 对分发消息进行重发
-        //    //Map<Host,Map<Integer, InstanceState>> instances
-        //    // 局部配置表 hostConfigureMap.get();
-        //    Iterator<Map.Entry<Host, Map<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
-        //    while (outerIterator.hasNext()) {
-        //        // 获取外层 Map 的键值对
-        //        Map.Entry<Host, Map<Integer, InstanceState>> outerEntry = outerIterator.next();
-        //        Host host = outerEntry.getKey();
-        //        //Map<Integer, InstanceState> innerMap = outerEntry.getValue();
-        //        //System.out.println("Host: " + host);
-        //        for (int i = hostConfigureMap.get(host).highestAcknowledgedInstance + 1; i <=  hostConfigureMap.get(host).highestAcceptedInstance; i++) {
-        //            short threadid=(short)(membership.frontIndexOf(host)+1);
-        //            forward(instances.get(host).get(i),threadid);
-        //        }
-        //    }
-        //
-        //    //因为将原链首元素移至删除节点的位置
-        //    nextOkBack=membership.nextLivingInBackChain(self);
-        //}
-        //
-        ////下面在后链链首 后链中间节点  后链链尾
-        //if (nextOkBack !=null && nextOkBack.equals(op.affectedHost)){
-        //    nextOkBack=membership.nextLivingInBackChain(self);
-        //    // 对排序信息进行重发
-        //    // 为什么是ack+1 开始，因为若ack序号的信息没有发往下一个节点，
-        //    // 就不会有对应节点的ack信息
-        //    for (int i = highestAcknowledgedInstanceCl + 1; i < inst.iN; i++) {
-        //        forwardCL(globalinstances.get(i));
-        //    }
-        //    // 对分发消息进行重发
-        //    //Map<Host,Map<Integer, InstanceState>> instances
-        //    // 局部配置表 hostConfigureMap.get();
-        //    Iterator<Map.Entry<Host, Map<Integer, InstanceState>>> outerIterator = instances.entrySet().iterator();
-        //    while (outerIterator.hasNext()) {
-        //        // 获取外层 Map 的键值对
-        //        Map.Entry<Host, Map<Integer, InstanceState>> outerEntry = outerIterator.next();
-        //        Host host = outerEntry.getKey();
-        //        Map<Integer, InstanceState> innerMap = outerEntry.getValue();
-        //        //System.out.println("Host: " + host);
-        //        for (int i = hostConfigureMap.get(host).highestAcknowledgedInstance + 1; i <=  hostConfigureMap.get(host).highestAcceptedInstance ; i++) {
-        //            short threadid=(short)(membership.frontIndexOf(host)+1);
-        //            forward(instances.get(host).get(i),threadid);
-        //        }
-        //    }
-        //}else{
-        //}
+        // TODO: 2023/8/3  
+        
     }
     
     
     /**
-     * 转发accept信息给下一个节点
+     * 转发accept信息给下一个节点或ack到Leader
      * */
     private void forwardCL(InstanceStateCL inst) {
-        // 这里需要修改  不能使用满足F+1 ，才能发往下一个节点，
-        //  若一个节点故障，永远不会满足F+1,应该使用逻辑链前链是否走完
 
-        //有两种情况属于链尾:一种是只有前链  一种是有后链
-
-        //这是只有一种前链的情况
-        if(nextOkFront!=null && nextOkBack==null){
-            if (inst.counter>=QUORUM_SIZE){
-                sendMessage(new AcceptAckCLMsg(inst.iN), supportedLeader());
-                return;
-            }else {
-                AcceptCLMsg msg = new AcceptCLMsg(inst.iN, inst.highestAccept, inst.counter, inst.acceptedValue,
-                        highestAcknowledgedInstanceCl);
-                sendMessage(msg, nextOkFront);
-                return;
-            }
-        }
-        
-        //这说明是有后链，而且还是后链的尾节点
-        if (nextOkFront==null && nextOkBack==null) {
+        // TODO: 2023/8/3 这里使用nextOk节点，不再使用nextoKfront 和nextOkBack
+        // 转发消息应该循环完整条链
+        if (nextOK.equals(members.get(0))){//使用逻辑链还是直接Leader
+            // 发送ack前判断是否满足大多数的含义
             if (inst.counter < QUORUM_SIZE) {
                 logger.error("Last living in chain cannot decide. Are f+1 nodes dead/inRemoval? "
                         + inst.counter);
                 throw new AssertionError("Last living in chain cannot decide. " +
                         "Are f+1 nodes dead/inRemoval? " + inst.counter);
             }
-            //if (logger.isDebugEnabled()){
-            //    logger.debug("是后链链尾,向"+ supportedLeader()+"发送AcceptAckCLMsg("+inst.iN+")");
-            //}
             sendMessage(new AcceptAckCLMsg(inst.iN), supportedLeader());
-            return;
+        }else {//发送accept信息
+            AcceptCLMsg msg = new AcceptCLMsg(inst.iN, inst.highestAccept, inst.counter, inst.acceptedValue,
+                    highestAcknowledgedInstanceCl);
+            sendMessage(msg, nextOK);
         }
         
-        //正常转发有两种情况： 在前链中转发  在后链中转发
-        AcceptCLMsg msg = new AcceptCLMsg(inst.iN, inst.highestAccept, inst.counter, inst.acceptedValue,
-                highestAcknowledgedInstanceCl);
-        if (nextOkFront!=null){//是前链
-            if (inst.counter < QUORUM_SIZE   ){// 投票数不满F+1，发往nextOkFront
-                //if (logger.isDebugEnabled()){
-                //    logger.debug("当前节点是前链,向前链节点"+nextOkBack+"转发"+msg);
-                //}
-                //
-                sendMessage(msg, nextOkFront);
-            } else{
-                //if (logger.isDebugEnabled()){
-                //    logger.debug("当前节点是前链,向后链节点"+nextOkBack+"转发"+msg);
-                //}
-                sendMessage(msg, nextOkBack);
-            }
-        } else {//是后链
-            //if (logger.isDebugEnabled()){
-            //    logger.debug("当前节点是后链,向后链节点"+nextOkBack+"转发"+msg);
-            //}
-            sendMessage(msg, nextOkBack);
-        }
+        //if(nextOkFront!=null && nextOkBack==null){
+        //    if (inst.counter>=QUORUM_SIZE){
+        //        sendMessage(new AcceptAckCLMsg(inst.iN), supportedLeader());
+        //        return;
+        //    }else {
+        //        AcceptCLMsg msg = new AcceptCLMsg(inst.iN, inst.highestAccept, inst.counter, inst.acceptedValue,
+        //                highestAcknowledgedInstanceCl);
+        //        sendMessage(msg, nextOkFront);
+        //        return;
+        //    }
+        //}
+        //
+        ////这说明是有后链，而且还是后链的尾节点
+        //if (nextOkFront==null && nextOkBack==null) {
+        //    if (inst.counter < QUORUM_SIZE) {
+        //        logger.error("Last living in chain cannot decide. Are f+1 nodes dead/inRemoval? "
+        //                + inst.counter);
+        //        throw new AssertionError("Last living in chain cannot decide. " +
+        //                "Are f+1 nodes dead/inRemoval? " + inst.counter);
+        //    }
+        //    //if (logger.isDebugEnabled()){
+        //    //    logger.debug("是后链链尾,向"+ supportedLeader()+"发送AcceptAckCLMsg("+inst.iN+")");
+        //    //}
+        //    sendMessage(new AcceptAckCLMsg(inst.iN), supportedLeader());
+        //    return;
+        //}
+        //
+        ////正常转发有两种情况： 在前链中转发  在后链中转发
+        //AcceptCLMsg msg = new AcceptCLMsg(inst.iN, inst.highestAccept, inst.counter, inst.acceptedValue,
+        //        highestAcknowledgedInstanceCl);
+        //if (nextOkFront!=null){//是前链
+        //    if (inst.counter < QUORUM_SIZE   ){// 投票数不满F+1，发往nextOkFront
+        //        //if (logger.isDebugEnabled()){
+        //        //    logger.debug("当前节点是前链,向前链节点"+nextOkBack+"转发"+msg);
+        //        //}
+        //        //
+        //        sendMessage(msg, nextOkFront);
+        //    } else{
+        //        //if (logger.isDebugEnabled()){
+        //        //    logger.debug("当前节点是前链,向后链节点"+nextOkBack+"转发"+msg);
+        //        //}
+        //        sendMessage(msg, nextOkBack);
+        //    }
+        //} else {//是后链
+        //    //if (logger.isDebugEnabled()){
+        //    //    logger.debug("当前节点是后链,向后链节点"+nextOkBack+"转发"+msg);
+        //    //}
+        //    sendMessage(msg, nextOkBack);
+        //}
     }
     
     
@@ -1785,10 +1585,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             }
         }
     }
-    
-    
-    
-    
+
+
     
     
     
@@ -1934,7 +1732,11 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     private void uponJoinRequestOut(JoinRequestMsg msg, Host to, short destProto, int channelId) {
         closeConnection(to);
     }
-    
+
+    // TODO: 2023/8/3  如果新加入节点之前存在在系统中，应该根据joinSuccessMsg拿到之前的消息
+    // TODO: 2023/5/29 因为joinsuccessage和store  state是配套的，
+    //  用哪个节点的store state就用那个 joinMessage
+    //TODO  新加入节点也要对局部日志和节点配置表进行更新
     // Notice 在第F+1个节点发送joinsuccessMsg，后续F个，以及前链前F个节点都会发joinsuccessMsg
     /**
      * 收到添加操作被执行的节点的反馈：先是后链节点 ，后是前链节点发送
@@ -1956,6 +1758,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                 assert receivedState.getKey().equals(msg.iN);
                 triggerNotification(new InstallSnapshotNotification(receivedState.getValue()));
                 state = TPOChainProto.State.ACTIVE;
+                triggerStateChange();
                 // TODO: 2023/5/23  关于加入成功后，就执行暂存的命令，合适吗？ 
                 //   还有对bufferedOps的清空
                 //bufferedOps.forEach(o -> triggerNotification(new ExecuteBatchNotification(o.getBatch())));
@@ -1970,6 +1773,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             logger.warn("Ignoring " + msg);
     }
 
+    // TODO: 2023/8/3  可以设置从原链尾节点发送状态:包括已执行状态和未执行消息的列表List集  
+    // TODO: 2023/8/3  新加入节点应该接收的状态是到accept信息的状态：包括执行状态， 
     /**
      *时钟  重新请求快照
      * */
@@ -2016,12 +1821,11 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         }
     }
 
-    //TODO  新加入节点也要对局部日志和节点配置表进行更新
 
 
-    // TODO: 2023/5/29 因为joinsuccessage和store  state是配套的，
-    //  用哪个节点的store state就用那个 joinMessage
-    //加入节点的接收服务端处理方法
+    
+    
+    //-------------------------------加入节点的接收服务端处理方法
 
     
     /**
@@ -2036,8 +1840,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         else
             logger.warn("Ignoring joinRequest while in " + state + " state: " + msg);
     }
-
-
+    
+    
     /**
      * 请求StateRequestMsg
      * */
@@ -2056,6 +1860,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         }
     }
 
+    
     // 所有执行添加节点的节点都会存储一个状态
     /**
      *接收到Frontend发来的Snapshot，转发到target.

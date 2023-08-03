@@ -29,7 +29,10 @@ public class RuntimeConfigure {
     
     //记录各个command leader进行命令的分发的序号，某个节点在故障恢复后，又成为新的前链节点，那前链节点使用这个，其他节点不使用用这个
     public int lastAcceptSent = -1;
-   
+
+
+    // TODO: 2023/8/3 上次给这个节点排序的号  Leader使用，确定排序是不是依次的，不是，那么查看局部日志有没有对应缺少排序的消息，对缺少排序可以补充
+    public int  lastOrder=-1;
     
     
     //每个节点在收到前链节点时对这三条信息进行更改
