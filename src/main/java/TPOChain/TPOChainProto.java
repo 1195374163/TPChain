@@ -683,7 +683,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                     values.add(new AcceptedValueCL(i, acceptedInstance.highestAccept, acceptedInstance.acceptedValue));
                 }
                 sendOrEnqueue(new PrepareOkMsg(msg.iN, msg.sN, values), from);
-                lastLeaderOp = System.currentTimeMillis();
+                lastLeaderOp = System.currentTimeMillis();// 这个是必须的，防止再竞争Leader
             } else//当msg的SN小于等于当前leader标记，丢弃
                 logger.warn("Discarding prepare since sN <= hP");
         } else { //Respond with decided message  主要对于系统中信息滞后的节点进行更新
@@ -1267,9 +1267,17 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      *标记要删除的节点
      * */
     private void markForRemoval(InstanceStateCL inst) {
-        // TODO: 2023/8/3  应该修改删除物理链   从而触发逻辑链的修改
+        // TODO: 2023/8/3  应该修改删除物理链 从而触发逻辑链的修改,之后需要将转发
+        // 分情况讨论： 后链节点   前链节点非Leader    Leader节点(不会，Leader不会发出自己删除自己的命令)    
+        MembershipOp op = (MembershipOp) inst.acceptedValue;
+        //这里封装了实现细节：实际改变了物理链：那么需要重新调整 逻辑控制链和数据通道链；Leader宕机是不会走这个流程，那么只有两种情况
+        membership.addToPendingRemoval(op.affectedHost);
+          
+        //通知应该改变Front层，
+        triggerMembershipChangeNotification();
         
-        
+        //通知改变Data层，
+        changeDataFrontAndBackChain();
     }
     
     
@@ -1278,10 +1286,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      * */
     // 链只是传导排序信息，最后ack发给Leader，是新Leader还是
     private void forwardCL(InstanceStateCL inst) {
-
-        // TODO: 2023/8/3 这里使用nextOk节点，不再使用nextoKfront 和nextOkBack
         // 转发消息应该循环完整条链
-        if (nextOK.equals(members.get(0))){//使用逻辑链还是直接Leader
+        if (nextOK.equals(members.get(0))){//使用逻辑链，表明已经传输到链尾
             // 发送ack前判断是否满足大多数的含义
             if (inst.counter < QUORUM_SIZE) {
                 logger.error("Last living in chain cannot decide. Are f+1 nodes dead/inRemoval? "
@@ -1295,55 +1301,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                     highestAcknowledgedInstanceCl);
             sendMessage(msg, nextOK);
         }
-        //if(nextOkFront!=null && nextOkBack==null){
-        //    if (inst.counter>=QUORUM_SIZE){
-        //        sendMessage(new AcceptAckCLMsg(inst.iN), supportedLeader());
-        //        return;
-        //    }else {
-        //        AcceptCLMsg msg = new AcceptCLMsg(inst.iN, inst.highestAccept, inst.counter, inst.acceptedValue,
-        //                highestAcknowledgedInstanceCl);
-        //        sendMessage(msg, nextOkFront);
-        //        return;
-        //    }
-        //}
-        //
-        ////这说明是有后链，而且还是后链的尾节点
-        //if (nextOkFront==null && nextOkBack==null) {
-        //    if (inst.counter < QUORUM_SIZE) {
-        //        logger.error("Last living in chain cannot decide. Are f+1 nodes dead/inRemoval? "
-        //                + inst.counter);
-        //        throw new AssertionError("Last living in chain cannot decide. " +
-        //                "Are f+1 nodes dead/inRemoval? " + inst.counter);
-        //    }
-        //    //if (logger.isDebugEnabled()){
-        //    //    logger.debug("是后链链尾,向"+ supportedLeader()+"发送AcceptAckCLMsg("+inst.iN+")");
-        //    //}
-        //    sendMessage(new AcceptAckCLMsg(inst.iN), supportedLeader());
-        //    return;
-        //}
-        //
-        ////正常转发有两种情况： 在前链中转发  在后链中转发
-        //AcceptCLMsg msg = new AcceptCLMsg(inst.iN, inst.highestAccept, inst.counter, inst.acceptedValue,
-        //        highestAcknowledgedInstanceCl);
-        //if (nextOkFront!=null){//是前链
-        //    if (inst.counter < QUORUM_SIZE   ){// 投票数不满F+1，发往nextOkFront
-        //        //if (logger.isDebugEnabled()){
-        //        //    logger.debug("当前节点是前链,向前链节点"+nextOkBack+"转发"+msg);
-        //        //}
-        //        //
-        //        sendMessage(msg, nextOkFront);
-        //    } else{
-        //        //if (logger.isDebugEnabled()){
-        //        //    logger.debug("当前节点是前链,向后链节点"+nextOkBack+"转发"+msg);
-        //        //}
-        //        sendMessage(msg, nextOkBack);
-        //    }
-        //} else {//是后链
-        //    //if (logger.isDebugEnabled()){
-        //    //    logger.debug("当前节点是后链,向后链节点"+nextOkBack+"转发"+msg);
-        //    //}
-        //    sendMessage(msg, nextOkBack);
-        //}
     }
     
     

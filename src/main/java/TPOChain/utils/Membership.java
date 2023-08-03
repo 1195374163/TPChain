@@ -219,11 +219,7 @@ public class Membership {
     }
     
     //若是前链节点的话，它的后链节点就是后链首节点
-    //TODO  使用这个方法时，应该进行判定是否返回值为null，为null，标志着此节点是链尾
-    // 因为这个是前链，那么在收到它的逻辑链的链头消息，对其进行decided的时候
-    // 需要向链头发送ack信息
-    // 在整个系统只有前链节点时，没有后链时，，即系统正好F+1各前链节点
-    // 每进行节点的删除处理应该整个系统存活的节点是否满足F+1 
+
     /**
      * 返回当前节点在后段链的下一个存活节点s
      * */
@@ -337,7 +333,7 @@ public class Membership {
     public void addToPendingRemoval(Host affectedHost) {
         //不管是前链还是后链，都要将受影响节点加入 待移除列表中
         boolean add = pendingRemoval.add(affectedHost);
-        assert add;
+        
         if (frontChainContain(affectedHost)){//如果当前节点在前链，移至后链
             int removePosition= frontIndexMap.get(affectedHost);
             Host  head=getBackChainHead();
