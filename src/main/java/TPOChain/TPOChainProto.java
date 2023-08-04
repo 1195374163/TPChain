@@ -1275,8 +1275,9 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
           
         //通知应该改变Front层，
         triggerMembershipChangeNotification();
+        // TODO: 2023/8/3 因为后链节点的Front挂载在对应前链节点，当 
         
-        //通知改变Data层，
+        //通知改变Data层，这个是更新FrontChain和BackChain，之后通知Data层
         changeDataFrontAndBackChain();
     }
     
