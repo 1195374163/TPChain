@@ -177,7 +177,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     /**
      * 在竞选leader时即候选者时暂存的命令
      * */
-    private final Queue<AppOpBatch> waitingAppOps = new LinkedList<>();
+    private final Queue<SortValue> waitingAppOps = new LinkedList<>();
     
     
     //成员添加命令呢？ 删除命令，这个旧领导可以不传给新leader，因为新Leader在当选成功后，会重新删掉已经断开连接的节点
@@ -601,11 +601,11 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     }
     
     
-    
-    //  抑制一些候选举leader的情况：只有在与leader相距(F+1)/2 +1
-    // 有问题：在leader故障时，leader与后链首节点交换了位置
-    // 除了初始情况下supportedLeader()=null;正常超时怎么解决
-    // 对上面情况做出解答： 所有节点都可以竞选新leader
+    /**  抑制一些候选举leader的情况：只有在与leader相距(F+1)/2 +1
+    * 有问题：在leader故障时，leader与后链首节点交换了位置
+    * 除了初始情况下supportedLeader()=null;正常超时怎么解决
+    * 对上面情况做出解答： 所有节点都可以竞选新leader
+    */ 
     /**
      * 在leadertimer超时争取当leader
      */
@@ -715,16 +715,11 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         if (amQuorumLeader && !sN.getNode().equals(self)) {
             amQuorumLeader = false;
             cancelTimer(noOpTimerCL);
-            
+            // 清空队列
             waitingAppOps.clear();
             waitingMembershipOps.clear();
         }
         //不为leader的就更新个leader的标志SN
-
-        // TODO: 2023/8/2 应该这里改变，应该在Leader选举成功消息调用，当然这里也可以调用 
-        // 改变节点的挂载，将后链节点挂载在前链除了leader节点上
-        triggerMembershipChangeNotification();
-        //triggerLeaderChange();
     }
     
     
@@ -897,8 +892,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             }
         });
         
-        //设置为0立马给其他节点发送消息,因为上面的条件不一定全部满足,
-        // 需要立马发送noop消息
+        
+        //设置为0立马给其他节点发送消息,因为上面的条件不一定全部满足,需要立马发送noop消息
         lastAcceptTimeCl = 0;
         
         
@@ -914,15 +909,16 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                 sendNextAcceptCL(nextOp);
             } 
         }
-        // 下面存储的数据结构不是排序请求,应该删除
+        
+        //处理在候选阶段的信息
         /**
         * 发送暂存的的排序消息
         * */
-        //if (! waitingAppOps.isEmpty()){
-        //    while ((nextOp = waitingAppOps.poll()) != null) {
-        //        sendNextAcceptCL(nextOp);
-        //    }
-        //}
+        if (! waitingAppOps.isEmpty()){
+            while ((nextOp = waitingAppOps.poll()) != null) {
+                sendNextAcceptCL(nextOp);
+            }
+        }
     }
 
     
@@ -934,11 +930,38 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             logger.debug("收到选举成功消息"+msg + " from:" + from);
         }
         setNewInstanceLeader(msg.iN, msg.sN);
-        // 向
+        // 在候选阶段，不会通知Data新Leader，只有成功当选之后再通知Data层，所以不会再候选者阶段收到排序请求 
+
+        // 向Data层传输新Leader
         triggerLeaderChange();
-        //因为Leader已经选举出来，所以可以生成逻辑控制链 
+        //因为Leader已经选举出来，从物理链中可以生成逻辑控制链， 
         changeLogicChain();
+        // TODO: 2023/8/2 应该这里改变，应该在Leader选举成功消息调用，当然这里也可以调用 
+        // 改变节点的挂载，将后链节点挂载在前链除了leader节点的前链节点
+        triggerMembershipChangeNotification();
     }
+    
+    
+    /**
+     * 处理leader和其他节点呼吸事件
+     * */
+    private  void onNoOpTimer(NoOpTimer timer, long timerId) {
+        //设置时钟的触发时间，但在内部使用if判断才执行对应指令
+        if (amQuorumLeader) {
+            assert waitingAppOps.isEmpty() && waitingMembershipOps.isEmpty();
+            if (System.currentTimeMillis() - lastAcceptTimeCl > NOOP_SEND_INTERVAL)
+                if (logger.isDebugEnabled()){
+                    logger.debug("leader 时钟超时自动发送noop消息");
+                }
+                sendNextAcceptCL(new NoOpValue());
+        } else {
+            logger.warn(timer + " while not quorumLeader");
+            cancelTimer(noOpTimerCL);
+        }
+    }
+
+    // TODO: 2023/8/3 什么时候会出现候选者：因为prepare发过来就相等于候选者，达到多数才属于Leader,
+    //  那接收prepare的节点只是以为是Leader，其实只是候选者，只有在拿到选举成功消息，才能说明绑定的是Leader
     
     // TODO: 2023/8/2 在Leader更新成功调用，缺少调用： 在节点被删除  被添加处使用
     /**
@@ -947,7 +970,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     private  void changeLogicChain(){
         Host leader=supportedLeader();
         int indexleader=membership.frontIndexOf(leader);
-        
+
         List<Host> fronttemp=membership.getFrontChain();
         for (int i=0;i<frontChain.size();i++){
             int index=(indexleader+i)%frontChain.size();
@@ -956,8 +979,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         // 这个是不包含标记删除节点的后链
         List<Host> backtemp=membership.getBackChain();
         members.addAll(backtemp);
-        
-        
+
+
         //--------------重新生成逻辑链之后要改变nextok的连接
         int indexself=members.indexOf(self);
         Host newnextok=members.get((indexself+1)%members.size());
@@ -981,26 +1004,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         }
     }
     
-    /**
-     * 处理leader和其他节点呼吸事件
-     * */
-    private  void onNoOpTimer(NoOpTimer timer, long timerId) {
-        //设置时钟的触发时间，但在内部使用if判断才执行对应指令
-        if (amQuorumLeader) {
-            assert waitingAppOps.isEmpty() && waitingMembershipOps.isEmpty();
-            if (System.currentTimeMillis() - lastAcceptTimeCl > NOOP_SEND_INTERVAL)
-                if (logger.isDebugEnabled()){
-                    logger.debug("leader 时钟超时自动发送noop消息");
-                }
-                sendNextAcceptCL(new NoOpValue());
-        } else {
-            logger.warn(timer + " while not quorumLeader");
-            cancelTimer(noOpTimerCL);
-        }
-    }
-
-    
-    
     
     
     
@@ -1015,8 +1018,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     private void   triggerInitializeCompletedNotification(){
         triggerNotification(new InitializeCompletedNotification());
     }
-    
-    
+
+    // TODO: 2023/8/4 以下这条通知，应该在哪里调用，是Prepare setNewLeader  还是  ElectionSuccess 
     /**
      * 向front层发送成员改变通知
      * */
@@ -1062,12 +1065,11 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     }
 
 
+    // FIXME: 2023/8/3 除了初始配置，应该在状态更新之后调用调用处写清，为什么需要这个，因为再状态是Join,是不能
     /**
      *  data层和control层状态一致，特别在outConnectionUp()中根据这个状态，判断是否转发消息 
      */
     private  void  triggerStateChange(){
-        // TODO: 2023/8/3 除了初始配置，应该在状态更新之后调用
-        // FIXME: 2023/8/3 调用处写清
         // 这个不需要序列和反序列化，因为是进程间通信，通知所有的data层的状态
         triggerNotification(new StateNotification(state));
     }
@@ -1082,9 +1084,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     
 /**------leader的重新发送排序命令，也可以包括成员添加，删除操作--**/
 
-    // TODO: 2023/8/3 什么时候会出现候选者：因为prepare发过来就相等于候选者，达到多数才属于Leader,
-    //  那接收prepare的节点只是以为是Leader，其实只是候选者，只有在拿到选举成功消息，才能说明绑定的是Leader
-
  
     /**
      *  其他节点的data端发过来OrderMsg信息，在这里接收
@@ -1097,8 +1096,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             //}
             sendNextAcceptCL(new SortValue(msg.node,msg.iN));
         }else if (supportedLeader().equals(self)){// 当为候选者
-            // TODO: 2023/8/1 将排序请求缓存 
-            
+            // 将排序请求缓存
+            waitingAppOps.add(new SortValue(msg.node,msg.iN));
         } else {//对消息进行转发,转发到leader
             sendOrEnqueue(msg,supportedLeader());
             logger.warn("not leader but receive OrderMSg msg");
@@ -1112,10 +1111,11 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     public void onSubmitOrderMsg(SubmitOrderMsg not, short from){
         OrderMSg msg=not.getOrdermsg();
         if (amQuorumLeader){//只有leader才能处理这个排序请求
+            // TODO: 2023/8/4 先处理缓存 ，在成为Leader之后
             sendNextAcceptCL(new SortValue(msg.node,msg.iN));
         } else if (supportedLeader().equals(self)){// 当为候选者
-            // TODO: 2023/8/1 将排序请求缓存 
-            
+            // 将排序请求缓存 
+            waitingAppOps.add(new SortValue(msg.node,msg.iN));
         } else {//对消息进行转发,转发到leader
             sendOrEnqueue(msg,supportedLeader());
             logger.warn("not leader but receive SubmitOrderMsg ipc");
@@ -1435,8 +1435,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //if (inst.acceptedValue.type != PaxosValue.Type.NO_OP)
         //    lastAcceptTimeCl = 0; //Force sending a NO-OP (with the ack)
     }
-    
 
+    // TODO: 2023/8/4 如果消息队列中没有，再从日志中获取日志
     //TODO 一个命令可以回复客户端，只有在它以及它之前所有实例被ack时，才能回复客户端
     // 这是分布式系统的要求，因为原程序已经隐含了这个条件，通过判断出队列结构，FIFO，保证一个batch执行了，那么
     // 它之前的batch也执行了
@@ -1520,9 +1520,11 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             }
         }
     }
-    
-    
-    // 回收线程
+
+
+    /**
+     * 回收线程,回收全局日志的
+     */
     private void gcLoop(){
         int olderexecute;
         int olderack;

@@ -53,7 +53,7 @@ public class TPOChainFront extends FrontendProto {
     private final Queue<Pair<Long, List<byte[]>>> pendingReads;
 
     
-    // TODO: 2023/8/3 加上两个队列 
+
     // 一个向WrieTo发送失败队列：元素应该是发送的peerBatchMessage
     private Queue<PeerBatchMessage>  failWrites;
     // 一个缓存在writTo不可连接的暂存队列
@@ -83,7 +83,7 @@ public class TPOChainFront extends FrontendProto {
     // Front使用哪个编号的Data通道
     private  int index;
 
-    // TODO: 2023/8/3 Front应该也暂存写的消息
+
     public TPOChainFront(Properties props, short protoIndex, Application app) throws IOException {
         super(PROTOCOL_NAME_BASE + protoIndex, (short) (PROTOCOL_ID_BASE + protoIndex),
                 props, protoIndex, app);
@@ -219,7 +219,7 @@ public class TPOChainFront extends FrontendProto {
         }
     }
     
-    // 这个只能是前链节点调用
+    // 这个只能是前链节点调用,接收自身或挂载在自身节点的后链节点的Msg
     
     /**
      * 连接下层的通道 将消息转发给下层的协议层
@@ -282,7 +282,7 @@ public class TPOChainFront extends FrontendProto {
 
     
     
-     //Notice front只连接到 writeto即 leader节点，对于其他节点不连接
+
     
     /**
      * 在TCP连接writesTO节点时，将pendingWrites逐条发送到下一个节点
@@ -405,7 +405,9 @@ public class TPOChainFront extends FrontendProto {
     
     
     
-    //主要是改变成员列表参数，改变节点所指向的leader    WritesTo参数
+    
+    
+    //主要是改变成员列表参数，改变节点所指向的WritesTo参数  ; Front只连接到 writeto即 leader节点，对于其他节点不连接
     /**
      * logger.info("New writesTo: " + writesTo.getAddress());
      * */
@@ -426,11 +428,11 @@ public class TPOChainFront extends FrontendProto {
             //Update and open to new writesTo
             writesTo = new Host(notification.getWritesTo(), PEER_PORT);
             logger.info("New mount: " + writesTo.getAddress());
-            // 
+            // 更换挂载点
             if (!writesTo.getAddress().equals(self)){
                 openConnection(writesTo, peerChannel);
-            }else {//这个说明前链节点是自身节点
-                // 对失败的节点处理
+            }else {
+                // 这个说明前链节点是自身节点对失败的节点处理
                 while (!failWrites.isEmpty()) {
                     // 从队列头部取出元素并进行处理
                     PeerBatchMessage msg = failWrites.poll();
@@ -446,7 +448,7 @@ public class TPOChainFront extends FrontendProto {
         }
     }
     
-    // 已经废弃
+    // 已经废弃,在Control层不会有调用，那这个也不会响应
     /**
      * 发送请求改变选择哪个Data通道
      * */
