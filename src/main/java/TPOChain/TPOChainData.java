@@ -509,20 +509,26 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
             if (Head.equals(sendHost)){// 前链节点没有发生更换，那么只向他发送ack信息
                 sendMessage(acceptAckMsgtemp, nextok);
             }else {// 前链节点发生更换，需要向所有节点发送ack消息
-                //向集群中所有节点发送ack信息
-                for (Host item : membership) {
-                    sendMessage(acceptAckMsgtemp, item);
-                }
+                //向集群中所有节点发送ack信息,不是历来的通道使用者
+                // FIXME: 2023/8/4  2023/8/4 因为Data是半连接，所以这里不对，
+                // 解决办法是发送新Head节点，有Leader传递
+                //for (Host item : membership) {
+                //    // TODO: 2023/8/4   能不能包含自身节点：
+                //    sendMessage(acceptAckMsgtemp, item);
+                //}
             }
-            // TODO: 2023/7/28 作为尾节点扫描全部局部日志 ，如果这个节点的两个时间超过
+            //  作为尾节点扫描通道使用者的局部日志 ，如果这个节点的两个时间超过5s对全局节点发送ack消息
             long currentTime=System.currentTimeMillis();
-            // FIXME: 2023/7/28 不能是所有节点，只能是历来的通道的使用者，不能包含当前节点
-            for (Host item : membership) {
-                //如果
-                if (currentTime-hostConfigureMap.get(item).lastReceiveAckTime>5000){
-                    
-                }
-            }
+            // 不能是所有节点，只能是历来的通道的使用者，不能包含当前节点，而且是发送全局节点
+            //for (InetAddress item : hashSetAcceptNode) {
+            //    //shengchen
+            //    AcceptAckMsg oldacceptAckMsgtemp = new AcceptAckMsg(new Host(item,data_port), hostConfigureMap.get(item).highestAcknowledgedInstance);
+            //    if (currentTime-hostConfigureMap.get(item).lastReceiveAckTime>5000){
+            //        for (Host item2 : membership) {
+            //            sendMessage(oldacceptAckMsgtemp, item2);
+            //        }
+            //    }
+            //}
         }else {//正常地转发，这里使用的节点的配置中的ack序号
             AcceptMsg msg = new AcceptMsg(inst.iN, inst.highestAccept, inst.counter, inst.acceptedValue,
                     acceptNodeRuntimeConfigure.highestAcknowledgedInstance);
@@ -551,8 +557,9 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
             logger.warn("Ignoring acceptAck of Data for old instance: " + msg+"from"+from);
             return;
         }
-
-        // TODO: 2023/7/28   执行ack程序，取消++，改为直接赋值 
+        
+        ackHostRuntimeConfigure.lastReceiveAckTime=System.currentTimeMillis();
+        //   执行ack程序，取消++，改为直接赋值 
         ackHostRuntimeConfigure.highestAcknowledgedInstance=msg.instanceNumber;
 
 
@@ -566,6 +573,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         // FIXME: 2023/7/19 考虑故障之后，考虑将闹钟要表示是哪个节点的刷新信息
         //这里设置一个定时器,发送acceptack,一段时间没有后续要发的
         // 在发送新实例时在sendnextaccpt取消如果当前节点等于消息的发送节点,再设立闹钟
+        // TODO: 2023/8/4 这里其实不太需要：因为我会 
         if (ackHost.equals(self)){
             lastReceiveAckTime=System.currentTimeMillis();
             // TODO: 2023/7/28  不能设置为noop 的0.1s  应该长一点，因为设置为0.5s甚至1s 
@@ -582,6 +590,8 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         // TODO: 2023/7/28 只能是前链节点才能使用这个功能，不是前链节点取消这个功能 
         if (amFrontedNode){
             if (lastReceiveAckTime-lastSendTime>NOOP_SEND_INTERVAL){
+                // TODO: 2023/8/4  这里有问题，因为Data不是全连接的，ack信息应该沿着链传播 
+                // FIXME: 2023/8/4 这里有问题
                 membership.stream().filter(h -> !h.equals(self)).forEach(host -> sendMessage(new AcceptAckMsg(self, selfRuntimeConfigure.highestAcknowledgedInstance), host));
                 if (logger.isDebugEnabled()) {
                     logger.debug("向所有节点发送了acceptack为" + hostConfigureMap.get(self).highestAcknowledgedInstance + "的定时信息");

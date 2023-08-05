@@ -157,10 +157,10 @@ public abstract class FrontendProto extends GenericProtocol {
     }
 
     
-    protected  abstract void uponMessageFailed(ProtoMessage msg, Host host, short i, Throwable throwable, int i1);
-    //public void uponMessageFailed(ProtoMessage msg, Host host, short i, Throwable throwable, int i1) {
-    //    logger.warn("Failed: " + msg + ", to: " + host + ", reason: " + throwable.getMessage());
-    //}
+    //protected  abstract void uponMessageFailed(ProtoMessage msg, Host host, short i, Throwable throwable, int i1);
+    public void uponMessageFailed(ProtoMessage msg, Host host, short i, Throwable throwable, int i1) {
+        logger.warn("Failed: " + msg + ", to: " + host + ", reason: " + throwable.getMessage());
+    }
     
     
 

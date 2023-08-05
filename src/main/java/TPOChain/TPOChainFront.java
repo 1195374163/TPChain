@@ -55,9 +55,9 @@ public class TPOChainFront extends FrontendProto {
     
 
     // 一个向WrieTo发送失败队列：元素应该是发送的peerBatchMessage
-    private Queue<PeerBatchMessage>  failWrites;
+    private Queue<PeerBatchMessage>  failWrites= new LinkedList<>();
     // 一个缓存在writTo不可连接的暂存队列
-    private Queue<PeerBatchMessage>  waitWrites;
+    private Queue<PeerBatchMessage>  waitWrites= new LinkedList<>();
     
     
     
@@ -353,7 +353,7 @@ public class TPOChainFront extends FrontendProto {
     /**
      * 在消息发送至writeTo失败的消息暂存
      * */
-    protected void uponMessageFailed(ProtoMessage msg, Host host, short i, Throwable throwable, int i1){
+    public void uponMessageFailed(ProtoMessage msg, Host host, short i, Throwable throwable, int i1){
         logger.warn("Failed: " + msg + ", to: " + host + ", reason: " + throwable.getMessage());
         failWrites.add((PeerBatchMessage)msg);
     }

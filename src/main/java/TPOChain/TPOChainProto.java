@@ -119,9 +119,9 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     private final Host self;
     
     //主要是重新配前链，根据选定的Leader，从Membership生成以Leader为首节点的前链节点之后，之后依次接入后链节点
-    private List<Host> members;
+    private List<Host> members=new ArrayList<>();
     // nextOKFront和nextOkBack是静态的，，而nextOk是Leader选定之后，nextOK从nextOKFront和NextOkBack中选定一个
-    private Host Head;//使用
+    private Host Head=null;//使用
     private Host nextOK;
     //标记nextOk节点是否连接
     private boolean  nextOkConnnected=false;
@@ -684,6 +684,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                 }
                 sendOrEnqueue(new PrepareOkMsg(msg.iN, msg.sN, values), from);
                 lastLeaderOp = System.currentTimeMillis();// 这个是必须的，防止再竞争Leader
+                //
             } else//当msg的SN小于等于当前leader标记，丢弃
                 logger.warn("Discarding prepare since sN <= hP");
         } else { //Respond with decided message  主要对于系统中信息滞后的节点进行更新
@@ -720,6 +721,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             waitingMembershipOps.clear();
         }
         //不为leader的就更新个leader的标志SN
+        changeLogicChain();
     }
     
     
@@ -859,6 +861,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //新leader会发送noop消息，激活前链节点的转发消息
         logger.info("I am leader now! @ instance " + instanceNumber);
         
+        // Leader需要这个调整逻辑控制链
+        changeLogicChain();
         
         /**
          * 传递已经接收到accpted消息    Propagate received accepted ops
@@ -976,6 +980,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             int index=(indexleader+i)%frontChain.size();
             members.add(fronttemp.get(index));
         }
+        Head=members.get(0);
         // 这个是不包含标记删除节点的后链
         List<Host> backtemp=membership.getBackChain();
         members.addAll(backtemp);
@@ -1123,8 +1128,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     }
 
     
-    // TODO: 2023/7/19  noop太多，也影响性能，因为无效信息太多了，挤压正常信息的处理 ；
-    //  但是太少也不行(读依附在一定数量的noop消息)，因为noop附带的前链节点上次的ack请求，然后执行，是否可以将noop与其他消息并行处理
+    // TODO: 2023/7/19  noop太多，也影响性能，因为无效信息太多了，挤压正常信息的处理 ;但是太少也不行(读依附在一定数量的noop消息)同时noop附带的前链节点上次的ack请求，然后执行，是否可以将noop与其他消息并行处理
     
     /**
      * 生成排序消息发给
@@ -1159,7 +1163,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             } else {//若是正常的添加，删除
                 // fixme 这里需要修改，直接添加吧，不需要指定添加的位置，由集群节点映射表自己处理
                 if (next.opType == MembershipOp.OpType.ADD) {
-                    //这里指定了添加位置: 后链链尾位置，其实应该是后链链尾 的后面
+                    // TODO: 2023/8/4 应该加入节点，未被标记的链尾
+                    //这里指定了添加位置: 后链链尾位置，其实应该是后链链尾的后面，
                     next = MembershipOp.AddOp(next.affectedHost,membership.indexOf(membership.getBackChainTail()));
                 }
                 nextValue = next;
@@ -1236,8 +1241,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         
         //更新highestAcceptedInstance信息
         if (highestAcceptedInstanceCl < instance.iN) {
-            highestAcceptedInstanceCl++;
-            assert highestAcceptedInstanceCl == instance.iN;
+            highestAcceptedInstanceCl=instance.iN;
         }
 
         
@@ -1287,8 +1291,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      * */
     // 链只是传导排序信息，最后ack发给Leader，是新Leader还是
     private void forwardCL(InstanceStateCL inst) {
-        // 转发消息应该循环完整条链
-        if (nextOK.equals(members.get(0))){//使用逻辑链，表明已经传输到链尾
+        // 转发消息应该循环完整条链  
+        if (nextOK.equals(Head)){//使用逻辑链，表明已经传输到链尾
             // 发送ack前判断是否满足大多数的含义
             if (inst.counter < QUORUM_SIZE) {
                 logger.error("Last living in chain cannot decide. Are f+1 nodes dead/inRemoval? "
@@ -1871,9 +1875,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     /**----------涉及读 写  成员更改;接收上层中间件来的消息---------------------*/    
 
     
-    // 在节点处于候选者时，waitingAppOps  waitingMembershipOps接收正常操作 
-    //不应该接收，因为当前的候选节点不是总能成为leader，那么暂存的这些消息将一直保留在这里
-    //但直接丢弃也不行，直接丢弃会损失数据
+    // 在节点处于候选者时，waitingAppOps  waitingMembershipOps接收正常操作，不应该接收，因为当前的候选节点不是总能成为leader，那么暂存的这些消息将一直保留在这里，但直接丢弃也不行，直接丢弃会损失数据
     
     /**
      *处理frontend发来的批处理读请求
@@ -1906,12 +1908,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     }
 
 
-    
-    
-    
-    
-    
-    
+    // TODO: 2023/8/4 发送前，判断连接是否存在，可以避免，消息发送失败的，只会遗漏在断开连接传递过来消息之前的消息 
 
     /**
      * 消息Failed，发出logger.warn("Failed:)
@@ -1929,6 +1926,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     //Notice  新加入节点会触发这个，
     // 新加入节点的前继将所有东西进行转发
     // todo 会 or不会 ？因为初始时，这是outconnetion？
+    //   除非是先变更列表，将新加入节点纳入自己的nextok节点，之后再开启连接，两者顺序不可颠倒
     private void uponOutConnectionUp(OutConnectionUp event, int channel) {
         if (logger.isDebugEnabled()){
             logger.debug(event);
@@ -2019,10 +2017,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
 
     
 
-    //第一种情况：在对于新加入节点时，可能需要这些操作，新节点得到的成员列表和系统中的不一致的情况
-    //第二种情况： 新旧Leader更换之后，重新执行以往的删除操作，
-    //在接收一些删除节点操作的实例时，先进行可能移除
-    //在删除操作时，先进行标记，后进行删除：若删除的是前链节点，需要将后链首节点与要删除的节点互换位置
 
     
     //  ------------Utils-------工具方法
@@ -2049,6 +2043,12 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                 membership.addToPendingRemoval(o.affectedHost);
         }
     }
+    
+    
+    //第一种情况：在对于新加入节点时，可能需要这些操作，新节点得到的成员列表和系统中的不一致的情况
+    //第二种情况： 新旧Leader更换之后，重新执行以往的删除操作，
+    //在接收一些删除节点操作的实例时，先进行可能移除
+    //在删除操作时，先进行标记，后进行删除：若删除的是前链节点，需要将后链首节点与要删除的节点互换位置
 
 
     /**

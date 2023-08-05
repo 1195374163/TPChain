@@ -14,7 +14,6 @@ import pt.unl.fct.di.novasys.network.data.Host;
 import java.io.IOException;
 import java.util.*;
 
-// TODO: 2023/5/29 对 
 public class JoinSuccessMsg extends ProtoMessage {
 
     public static final short MSG_CODE = 205;
@@ -23,7 +22,7 @@ public class JoinSuccessMsg extends ProtoMessage {
     public final SeqN sN;
     public final List<Host> membership;
     public  HashSet<Host> pendingRemove;
-    // TODO: 2023/5/23  对日志改成 acceptValue和acceptedValueCl来传输 
+    // TODO: 2023/5/23  对日志改成 acceptValue和acceptedValueCl来传输，传输日志消息 ，以一个列表传输，不以消息传输
     public  Map<Host, RuntimeConfigure>  hostConfigureMap;
     public  Map<Host,Map<Integer, InstanceState>> instances;
     public  Map<Integer, InstanceStateCL> globalinstances;
