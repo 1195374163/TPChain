@@ -30,11 +30,11 @@ public abstract class FrontendProto extends GenericProtocol {
     // 操作的两种枚举
     public enum OpType {STRONG_READ, WRITE}
     
-    // 使用的端口号
+    // 使用的端口号：
     protected final int PEER_PORT;
     // 标识自身
     protected final InetAddress self;
-    // 对状态层的标识
+    // 对状态层的标识，对状态的操作调用这个
     protected final Application app;
     
     
@@ -51,7 +51,7 @@ public abstract class FrontendProto extends GenericProtocol {
     protected int peerChannel;
     
     
-    //系统中节点列表动态的更新，从下层的protocol层接收，是protocol层的membership的备份
+    //系统中节点列表动态的更新，从下层的protocol层接收，是protocol层的membership的备份：改变挂载节点
     protected List<InetAddress> membership;
 
     
@@ -70,7 +70,7 @@ public abstract class FrontendProto extends GenericProtocol {
         
         this.app = app;
         membership = null;
-        this.protoIndex = protoIndex;
+        this.protoIndex = protoIndex;// 不使用
     }
 
     
@@ -100,6 +100,8 @@ public abstract class FrontendProto extends GenericProtocol {
         //Consensus
         subscribeNotification(MembershipChange.NOTIFICATION_ID, this::onMembershipChange);
         subscribeNotification(ExecuteBatchNotification.NOTIFICATION_ID, this::onExecuteBatch);
+        
+        //----------------新加入节点使用
         subscribeNotification(InstallSnapshotNotification.NOTIFICATION_ID, this::onInstallSnapshot);
         
         //接收来自proto的请求state的请求
@@ -132,7 +134,7 @@ public abstract class FrontendProto extends GenericProtocol {
     
     
     
-    /* ----------------------- PEER EVENTS -------------- */
+    //----------------------- PEER EVENTS --------------
 
     /**
      * 处理PeerBatch消息事件
@@ -186,11 +188,9 @@ public abstract class FrontendProto extends GenericProtocol {
     }
     
     
-    
+    // -----------------接收Control层控制指令
     protected abstract void onExecuteBatch(ExecuteBatchNotification reply, short from);
 
-    
-    
     
     protected abstract void onMembershipChange(MembershipChange notification, short emitterId);
 }

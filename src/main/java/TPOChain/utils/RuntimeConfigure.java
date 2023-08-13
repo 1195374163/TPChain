@@ -39,8 +39,11 @@ public class RuntimeConfigure {
     public int highestAcceptedInstance = -1;
     
     public int highestDecidedInstance = -1;
+
+
+    // TODO: 2023/8/13 将ack和execute 设置两个访问锁 
+    // 这个有Data控制
     public int highestAcknowledgedInstance = -1;
-    
     
     //这个由Control进行赋值的
     public int highestExecutedInstance=-1;

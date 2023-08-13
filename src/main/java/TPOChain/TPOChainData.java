@@ -41,7 +41,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     
     public final static short PROTOCOL_ID = 300;
     public final static String PROTOCOL_NAME = "TPOChainData";
-    // 下面还有一个通道的标识
+    // 下面还有一个通道的标识  上面这两个都加上通道标识号
     
     
     
@@ -50,7 +50,6 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     public static final String DATA_PORT_KEY = "data_port";
     
     
-
     
  
     public static final String NOOP_INTERVAL_KEY = "noop_interval";
@@ -62,15 +61,12 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
 
     
     
-    
     // 下面是变量
     private final int NOOP_SEND_INTERVAL;
     
     private final int RECONNECT_TIME;
     
     private final int QUORUM_SIZE;
-    
-    
     
     
     
@@ -121,6 +117,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     // 删除：当收到这个节点的ack达到accpt数且新的通道使用者不是这个节点，这个可以删除
     private final Set<InetAddress> hashSetAcceptNode = new HashSet<>();
 
+    
     //根据从TPOChainProto传过来的前链节点分析当前通道的使用者
     private  InetAddress  channelUser;
     private  Map<Integer, InstanceState>  channelUserInstanceMap;
@@ -138,8 +135,8 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     private int  data_port;
     //总链：前链加后链：元素是包含端口号的完整 ip:port
     protected List<Host> membership=new ArrayList<>();
-
-    // 这个数据通道中的链首
+    // TODO: 2023/8/13 不应该有Head，只要确认是链头就可以了 
+    // 这个数据通道中的链首，主要是发送Ack  
     private Host Head;
     //前链连接和后链连接
     private Host self;
@@ -158,6 +155,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     private boolean amFrontedNode;
 
 
+    
     
     // TODO: 2023/7/28  GC回收通道使用者的旧日志    那历来使用者的日志呢  
     // gc线程 ：
@@ -257,13 +255,13 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         registerChannelEventHandler(peerChannel, InConnectionDown.EVENT_ID, this::uponInConnectionDown);
         registerChannelEventHandler(peerChannel, InConnectionUp.EVENT_ID, this::uponInConnectionUp);
         
-        
+        //
+        state=TPOChainProto.State.ACTIVE;
         gcThread.start();
         logger.info("TPOChaindata"+index+"开启: ");
-        
     }
 
-    
+
     // TODO: 2023/7/27 修复错误gc线程:程序爆Null错误，一般就是这出了问题：解决办法是当换节点时清空ack表
     //  强制设定  GC线程只处理  通道使用者的回收任务,因为别的节点就算剩余也不会残余太多
     // FIXME: 2023/7/28   不使用accept使用channeluser 而且对通道使用者每一轮进行缓存到中间变量
@@ -274,6 +272,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         int receiveack;
         int  receiveexecute;
         while (true) {
+            // TODO: 2023/8/13 从两个队列中peek一个值吧， 
             //因为通道使用者可能改变，先缓存
             RuntimeConfigure  temp=channelUserRuntimeConfigure;
             Map<Integer, InstanceState> tempMap=channelUserInstanceMap;
@@ -303,7 +302,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
             for (int i=temp.highestGCInstance+1;i<min;i++){
                 if (temp.highestGCInstance< min){
                     tempMap.remove(i);
-                    temp.highestGCInstance++;
+                    temp.highestGCInstance=i;
                     // TODO: 2023/7/31 将上面的++ 改为实例号的直接赋值 
                 }
             }
@@ -388,11 +387,12 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         selfRuntimeConfigure.lastAcceptSent = instance.iN;
         
         
-        //重发所有失败的申请排序信息
-        if(!failtoLeaderAppOps.isEmpty()){
-            while(!failtoLeaderAppOps.isEmpty()){
-                sendOrEnqueue(failtoLeaderAppOps.poll(),leader);
-            }
+        //重发所有失败的申请排序信息，在与Leader连接建立时已经完成
+
+
+        // TODO: 2023/8/13 这 
+        if (amFrontedNode){
+            
         }
         //同时向leader发送排序请求:排序不发noop消息改成直接向全体节点发送ack设置一个时钟,什么时候开启,什么时候关闭
         OrderMSg orderMSg = new OrderMSg(self, instance.iN);
@@ -614,7 +614,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
 
     //Control层初始化完成，对自身节点的一些参数设置:设置self,主要是因为TPChain的控制层对局部分发日志和配置进行初始化
     protected  void onInitializeCompletedNotification(InitializeCompletedNotification notification,short emitterID){
-        // TODO: 2023/7/27 可以将局部日志和配置表的初始化放在Data层而不是Control控制层 
+        //可以将局部日志和配置表的初始化放在Data层而不是Control控制层 ？ 不能因为
         selfInetAddress=self.getAddress();
         newterm = new SeqN(0, self);
 
@@ -633,16 +633,18 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         frontChain=notification.getFrontChain();
         
         //根据控制层传递得到通道使用者是哪个节点
-        channelUser=frontChain.get(index);
+        InetAddress newchannelUser=frontChain.get(index);
+        //将之前的通道的使用者加入使用者列表
+        if (channelUser!=null && !channelUser.equals(newchannelUser)){
+            hashSetAcceptNode.add(channelUser);
+        }
+        channelUser=newchannelUser;
         //得到通道使用者的日志表
         channelUserInstanceMap=instances.get(channelUser);
         //得到通道使用者的配置表
         channelUserRuntimeConfigure=hostConfigureMap.get(channelUser);
+
         
-        //将之前的通道的使用者加入使用者列表
-        if (accpetNodeInetAddress!=null){
-            hashSetAcceptNode.add(accpetNodeInetAddress);
-        }
         //在成员列表改动之后，清空原来的列表
         membership.clear();
         int size=frontChain.size();
@@ -654,7 +656,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
                 break;
             }
         }//logger.info("输出前链"+membership);
-
+        
         //判断若前链中包括自己，那么设置一个是amFrontedNode标记
         if (membership.contains(self)){
             amFrontedNode=true;
@@ -688,6 +690,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
             if (!nextok.getAddress().equals(self.getAddress()))
                 openConnection(nextok, peerChannel);
         }
+        // 否则不改变nextok指向
     }
 
     
@@ -742,16 +745,16 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
      * 在TCP连接writesTO节点时，将pendingWrites逐条发送到下一个节点
      */
     protected void onOutConnectionUp(OutConnectionUp event, int channel) {
-        // TODO: 2023/7/31 如果当前节点属于新加入节点，不应该传输分发日志，直接return; 
+        //在连接
         Host peer = event.getNode();
         if (peer.equals(leader)) {
             // 设置能接收客户端处理
             canHandleQequest = true;
-            // 重发失败的
+            // 重发失败的排序消息
             while(!failtoLeaderAppOps.isEmpty()){
                 sendOrEnqueue(failtoLeaderAppOps.poll(),leader);
             }
-            //开始处理暂存的
+            //开始处理暂存的请求：
             while(!waitingAppOps.isEmpty()){
                 AppOpBatch appOpBatch = waitingAppOps.poll();
                 // 处理 appOpBatch，可以对其进行操作或输出
@@ -760,7 +763,8 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
             //这里将暂存的消息从暂存队列中取出来开始处理
             logger.info("already Connected to leader :"+leader.getAddress());
         }
-  
+        
+        // TODO: 2023/7/31 如果当前节点属于新加入节点，不应该传输分发日志，直接return; 
         if (peer.equals(nextok)){
             nextokConnected=true;
             logger.info("already Connected to nextok :"+nextok.getAddress());
@@ -838,22 +842,18 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
      * 与 相应的尝试重新建立连接
      */
     private void onReconnectDataTimer(ReconnectDataTimer timer, long timerId) {
-        logger.info("time is out,reconnect to:"+timer.getHost());
-        openConnection(timer.getHost());
-        //if (timer.getHost().equals(leader)) {
-        //    logger.info("Trying to reconnect to leader " + timer.getHost());
-        //    openConnection(leader);
-        //    return;
-        //}
-        //if (timer.getHost().equals(nextOkFront)) {
-        //    logger.info("Trying to reconnect to nextOkFront " + timer.getHost());
-        //    openConnection(nextOkFront);
-        //    return;
-        //}
-        //if (timer.getHost().equals(nextOkBack)) {
-        //    logger.info("Trying to reconnect to nextOkBack " + timer.getHost());
-        //    openConnection(nextOkBack);
-        //}
+        Host temp=timer.getHost();
+        //logger.info("time is out,reconnect to:"+timer.getHost());
+        //openConnection(timer.getHost());
+        if (temp.equals(leader)) {
+            logger.info("Date Layer Trying to reconnect to leader " + timer.getHost());
+            openConnection(leader);
+            return;
+        }
+        if (timer.getHost().equals(nextok)) {
+            logger.info("Date Layer Trying to reconnect to nextOk " + timer.getHost());
+            openConnection(nextok);
+        }
     }
     
     //无实际动作
@@ -886,7 +886,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         }
         // 满足下方条件只会是排序消息，而不是分发消息
         if (leader!=null && destination.equals(leader)) {
-            if (leader.getAddress().equals(self.getAddress())){
+            if (leader.getAddress().equals(self.getAddress())){// 当Leader为自身节点
                 sendRequest(new SubmitOrderMsg((OrderMSg) msg), TPOChainProto.PROTOCOL_ID); 
             }else {
                 sendMessage(msg, TPOChainProto.PROTOCOL_ID,destination);

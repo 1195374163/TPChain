@@ -61,12 +61,12 @@ public class HashMapApp implements Application {
     private final AtomicInteger idCounter;
     private final ConcurrentMap<Integer, Pair<Integer, Channel>> opMapper;
     
-    //前端层
+    //前端层:其实只用了一个
     private final List<FrontendProto> frontendProtos;
-    //数据通道层
+    //数据通道层：F+1个
     private  List<TPOChainData> dataProtos;
     
-    //状态层
+    //状态层：和多少次操作
     private int nWrites,nReads;
     private ConcurrentMap<String, byte[]> store;
     
@@ -79,8 +79,6 @@ public class HashMapApp implements Application {
         opMapper = new ConcurrentHashMap<>();
         int port = Integer.parseInt(configProps.getProperty("app_port"));
         Babel babel = Babel.getInstance();
-        EventLoopGroup consensusWorkerGroup     = NetworkManager.createNewWorkerGroup();
-        EventLoopGroup consensusdataWorkerGroup = NetworkManager.createNewWorkerGroup();
         
         
         String alg = configProps.getProperty("algorithm");
@@ -88,12 +86,14 @@ public class HashMapApp implements Application {
         int nDatas = Short.parseShort(configProps.getProperty("n_datas"));
         frontendProtos = new LinkedList<>();//frontendProtos是List<FrontendProto> frontendProtos;
         dataProtos     =new LinkedList<>();
-        GenericProtocol consensusProto;
-        //GenericProtocol consensusdata = null;
-        //GenericProtocol consensusdata2=null;
+        EventLoopGroup consensusWorkerGroup     = NetworkManager.createNewWorkerGroup();
+        EventLoopGroup consensusdataWorkerGroup = NetworkManager.createNewWorkerGroup();
+        GenericProtocol consensusProto; // 核心控制层
+        
         
         int availableProcessors = Runtime.getRuntime().availableProcessors();
         logger.info("Available Processors: " + availableProcessors);
+        
         
         switch (alg) {
             case "chain_mixed":
@@ -189,14 +189,12 @@ public class HashMapApp implements Application {
         for (TPOChainData  dataproto:dataProtos){
             dataproto.init(configProps);
         }
-        // 为什么这个必须放到最后面，因为这个是控制层，需要向Front和Data传递一些重要的初始化参数到它们的队列中
+        // 为什么这个必须放到最后面，因为这个是控制层，需要向Front和Data传递一些重要的初始化参数到它们的队列中：比如局部各日志
         consensusProto.init(configProps);
-
         
         
-        //线程开
+        //线程开，开始执行各个协议队列中的事件
         babel.start();
-
         
         Runtime.getRuntime().addShutdownHook( new Thread(new Runnable() {
             @Override
@@ -204,6 +202,8 @@ public class HashMapApp implements Application {
                 logger.info("Writes: " + nWrites + ", reads: " + nReads);
             }
         }));
+        
+        
         //开启app的监听服务
         EventLoopGroup bossGroup = new NioEventLoopGroup();
         EventLoopGroup workerGroup = new NioEventLoopGroup();
@@ -277,6 +277,7 @@ public class HashMapApp implements Application {
 
     
     
+    //-----------Front层直接调用
     
 
     /**
@@ -387,7 +388,7 @@ public class HashMapApp implements Application {
          * */
         @Override
         public void channelInactive(ChannelHandlerContext ctx) {
-            logger.info("Client connection lost: " + ctx.channel().remoteAddress());
+            logger.info("As  a server;Client connection lost: " + ctx.channel().remoteAddress());
             ctx.fireChannelInactive();
         }
 

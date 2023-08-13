@@ -925,7 +925,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         }
     }
 
-    
+    //TODO 应该判别发送的Term是否大于当前的Term，大于再接受，小于不接受
     /**
      * 在成功选举后，发送选举成功消息
      */

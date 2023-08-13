@@ -48,15 +48,16 @@ public class TPOChainFront extends FrontendProto {
     
     
     
-    //Forwarded 对于已经发送下层协议的批处理，备份保存
+    //Forwarded 对于已经发送下层协议的批处理，备份保存，之后调用处来
     private final Queue<Pair<Long, OpBatch>> pendingWrites;
+    // 读缓存，是不发往Control层和其他节点的，只发一个标识
     private final Queue<Pair<Long, List<byte[]>>> pendingReads;
 
     
 
     // 一个向WrieTo发送失败队列：元素应该是发送的peerBatchMessage
     private Queue<PeerBatchMessage>  failWrites= new LinkedList<>();
-    // 一个缓存在writTo不可连接的暂存队列
+    // 一个缓存，在writTo不可连接的暂存队列
     private Queue<PeerBatchMessage>  waitWrites= new LinkedList<>();
     
     
@@ -66,20 +67,23 @@ public class TPOChainFront extends FrontendProto {
     private final Object writeLock = new Object();
     
     
-    //消息的发往地
+    //消息的发往地，是一个Host
     private Host writesTo;
     private boolean writesToConnected;
+    
     
     //上次读写操作的计时
     private long lastWriteBatchTime;
     private long lastReadBatchTime;
     
     
-    //ToForward writes将用户请求打成批处理
+    
+    //缓存中心：ToForward writes将用户请求打成批处理
     private List<byte[]> writeDataBuffer;
     //ToSubmit reads
     private List<byte[]> readDataBuffer;
 
+    
     // Front使用哪个编号的Data通道
     private  int index;
 
@@ -145,7 +149,7 @@ public class TPOChainFront extends FrontendProto {
         //接收来自 proto的请求
         registerReplyHandler(ExecuteReadReply.REPLY_ID, this::onExecuteRead);
 
-
+        // 接收Front层使用Data通道的id 改变
         subscribeNotification(FrontIndexNotification.NOTIFICATION_ID, this::onFrontIndexNotificationChange);
 
         
@@ -161,7 +165,7 @@ public class TPOChainFront extends FrontendProto {
     //---------CLIENT OPS-----关于从HashMap App是直接调用同步关系，不是异步完成;
     
     /**
-     * 接收从客户端接收来的信息，先缓存成批，最后成批处理
+     * 被HashMapApp直接调用；接收从客户端接收来的信息，先缓存成批，最后成批处理
      * */
     @Override
     public void submitOperation(byte[] op, OpType type) {
@@ -202,7 +206,7 @@ public class TPOChainFront extends FrontendProto {
     
     
     /**
-     * 将写信息转发至writeTo即leader处理
+     * 将写信息转发至writeTo即leader处理，直接调用到这里截止，后面都是异步完成
      * */
     private void sendBatchToWritesTo(PeerBatchMessage msg) {
         //logger.info("发送"+msg+"到"+writesTo);
@@ -214,7 +218,7 @@ public class TPOChainFront extends FrontendProto {
         }  
         if (writesToConnected){//如果连接到挂载点，进行发送
             sendMessage(peerChannel, msg, writesTo);
-        }else { // 挂载点失效，暂存消息
+        }else { // 挂载点还没有连接，暂存消息
             waitWrites.add(msg);
         }
     }
@@ -240,6 +244,7 @@ public class TPOChainFront extends FrontendProto {
      */
     private void sendNewReadBatch() {
         long internalId = nextId();
+        //
         pendingReads.add(Pair.of(internalId, readDataBuffer));
         //清空读缓存
         readDataBuffer = new ArrayList<>(LOCAL_BATCH_SIZE);
@@ -292,21 +297,18 @@ public class TPOChainFront extends FrontendProto {
         if (peer.equals(writesTo)) {
             writesToConnected = true;
             logger.debug("Connected to writesTo " + event);
-            //不会重复吗 ？
-            // 先将失败的重发
-            // TODO: 2023/8/4 如果自己变成前链了，怎么办 ，需要在
             while (!failWrites.isEmpty()) {
                 // 从队列头部取出元素并进行处理
                 PeerBatchMessage element = failWrites.poll();
-                sendMessage(peerChannel, element, writesTo);
+                sendBatchToWritesTo(element);
             }
             //转发暂存的队列
             while (!waitWrites.isEmpty()) {
                 // 从队列头部取出元素并进行处理
                 PeerBatchMessage element = waitWrites.poll();
-                sendMessage(peerChannel, element, writesTo);
+                sendBatchToWritesTo(element);
             }
-            // 注释掉下面这个
+            // 注释掉下面这个 //不会重复吗 ？
             //pendingWrites.forEach(b -> sendBatchToWritesTo(new PeerBatchMessage(b.getRight())));
         } else {
             logger.warn("Unexpected connectionUp, ignoring and closing: " + event);
@@ -330,6 +332,7 @@ public class TPOChainFront extends FrontendProto {
         logger.info(event);
         Host peer = event.getNode();
         if (peer.equals(writesTo)) {
+            writesToConnected = false;
             logger.warn("Connection failed to writesTo, re-trying in 1: " + event);
             setupTimer(new ReconnectTimer(writesTo), 1000);
         } else {
@@ -371,6 +374,7 @@ public class TPOChainFront extends FrontendProto {
     protected void onExecuteBatch(ExecuteBatchNotification not, short from) {
         if ((not.getBatch().getIssuer().equals(self)) && (not.getBatch().getFrontendId() == getProtoId())) {
             Pair<Long, OpBatch> ops = pendingWrites.poll();
+            // TODO: 2023/8/13 这里可以去掉，不保持顺序 
             if (ops == null || ops.getLeft() != not.getBatch().getBatchId()) {
                 logger.error("Expected " + not.getBatch().getBatchId() + ". Got " + ops + "\n" +
                         pendingWrites.stream().map(Pair::getKey).collect(Collectors.toList()));
@@ -412,8 +416,8 @@ public class TPOChainFront extends FrontendProto {
      * logger.info("New writesTo: " + writesTo.getAddress());
      * */
     protected void onMembershipChange(MembershipChange notification, short emitterId) {
-        //改变分发消息的通道指向
-        this.index=notification.getIndex();
+        // TODO: 2023/8/13 这里改变数据通道的指向 
+        this.index=notification.getIndex();//改变分发消息的通道指向 
      
         //update membership and responder
         membership = notification.getOrderedMembers();
