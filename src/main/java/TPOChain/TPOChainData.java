@@ -255,7 +255,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         registerChannelEventHandler(peerChannel, InConnectionDown.EVENT_ID, this::uponInConnectionDown);
         registerChannelEventHandler(peerChannel, InConnectionUp.EVENT_ID, this::uponInConnectionUp);
         
-        //
+        //初始设定为Active
         state=TPOChainProto.State.ACTIVE;
         gcThread.start();
         logger.info("TPOChaindata"+index+"开启: ");
@@ -362,7 +362,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         lastSendTime = System.currentTimeMillis();
         
         
-        // 得到分发消息的那个实例
+        // 得到分发消息的那个实例  //InstanceState instance = selfInstanceMap.computeIfAbsent(selfRuntimeConfigure.lastAcceptSent + 1, InstanceState::new);
         InstanceState instance;
         if (!selfInstanceMap.containsKey(selfRuntimeConfigure.lastAcceptSent + 1)) {
             instance=new InstanceState(selfRuntimeConfigure.lastAcceptSent + 1);
@@ -371,29 +371,16 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
             instance=selfInstanceMap.get(selfRuntimeConfigure.lastAcceptSent + 1);
         }
         
-
-        //InstanceState instance = selfInstanceMap.computeIfAbsent(selfRuntimeConfigure.lastAcceptSent + 1, InstanceState::new);
-        //assert instance.acceptedValue == null && instance.highestAccept == null;
-        //对当前的生成自己的seqn,以线程通道id为count，self为标记
-        
         
         // 先发给自己:这里直接使用对应方法
         //this.uponAcceptMsg(new AcceptMsg(instance.iN, newterm,
         //        (short) 0, nextValue,hostSendConfigure.highestAcknowledgedInstance), self, this.getProtoId(), peerChannel);
         sendOrEnqueue(new AcceptMsg(instance.iN, newterm,
                 (short) 0, val, selfRuntimeConfigure.highestAcknowledgedInstance), self);
-
         //设置发送标记数
         selfRuntimeConfigure.lastAcceptSent = instance.iN;
         
-        
-        //重发所有失败的申请排序信息，在与Leader连接建立时已经完成
-
-
-        // TODO: 2023/8/13 这 
-        if (amFrontedNode){
-            
-        }
+        //重发所有失败的申请排序信息，在与Leader连接建立时已经完成，这里不需要做
         //同时向leader发送排序请求:排序不发noop消息改成直接向全体节点发送ack设置一个时钟,什么时候开启,什么时候关闭
         OrderMSg orderMSg = new OrderMSg(self, instance.iN);
         sendOrEnqueue(orderMSg, leader);
@@ -446,12 +433,12 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
             logger.warn("Discarding already existing acceptmsg");
             return;
         }
-        
+        // 输出日志
         
         // 先得到排序commandleader节点的配置信息
         acceptRuntimeConfigure = hostConfigureMap.get(accpetNodeInetAddress);
         
-        //进行对实例的确定
+        //进行对实例接收和确认
         instance.accept(msg.sN, msg.value, (short) (msg.nodeCounter + 1));
         //进行更新领导操作时间
         acceptRuntimeConfigure.lastAcceptTime = System.currentTimeMillis();
@@ -468,11 +455,14 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
             acceptRuntimeConfigure.highestAcknowledgedInstance=msg.ack;
             //这个节点的配置表中lastReceiveAckTime时间
             acceptRuntimeConfigure.lastReceiveAckTime=System.currentTimeMillis();
-
             // TODO: 2023/7/28 从通道的历来使用者 
             //  判断通道的历来的使用者的ack是否等于accept值，如果则移除该节点，不止这里，
             //  还有在uponAck()也得需要这个方法
-            
+            if (hashSetAcceptNode.contains(accpetNodeInetAddress)){
+                if (acceptRuntimeConfigure.highestAcceptedInstance==acceptRuntimeConfigure.highestAcknowledgedInstance){
+                    hashSetAcceptNode.remove(accpetNodeInetAddress);
+                }
+            }
         }
 
         
@@ -488,11 +478,10 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         hostMessageQueue.get(accpetNodeInetAddress).add(instance);
         //将ack信息放入队列中，注意标注是什么节点的ack信息：已解决，将对应节点的ack，供
         acceptRuntimeConfigure.ackFlagQueue.add(msg.ack);
-
     }
 
     
-    // 修复除了uponacceptMsg()用forward()，还有uponConnectionUp()建立
+    // 修复除了uponacceptMsg()用forward()，还有uponConnectionUp()建立重发ack->accept的消息
     //  所以需要传递用哪个节点的参数，需要在形参中加入使用那个节点
     /**
      * 转发accept信息给下一个节点
@@ -505,30 +494,30 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         RuntimeConfigure  acceptNodeRuntimeConfigure=hostConfigureMap.get(acceptNode);
         //发送ack信息
         if (nextok.equals(Head)){
+            //对当前通道使用者处理
             AcceptAckMsg acceptAckMsgtemp = new AcceptAckMsg(sendHost, inst.iN);
             if (Head.equals(sendHost)){// 前链节点没有发生更换，那么只向他发送ack信息
                 sendMessage(acceptAckMsgtemp, nextok);
             }else {// 前链节点发生更换，需要向所有节点发送ack消息
                 //向集群中所有节点发送ack信息,不是历来的通道使用者
-                // FIXME: 2023/8/4  2023/8/4 因为Data是半连接，所以这里不对，
-                // 解决办法是发送新Head节点，有Leader传递
-                //for (Host item : membership) {
-                //    // TODO: 2023/8/4   能不能包含自身节点：
-                //    sendMessage(acceptAckMsgtemp, item);
-                //}
+                //  因为Data是半连接，所以这里只能向连接到节点转发ack信息
+                sendMessage(acceptAckMsgtemp, nextok);
             }
-            //  作为尾节点扫描通道使用者的局部日志 ，如果这个节点的两个时间超过5s对全局节点发送ack消息
+
+            // 在链尾节点对历来的通道使用者进行重新ack，
+            //  作为尾节点扫描通道使用者的局部日志 ，如果这个节点的两个时间超过1s对全局节点发送ack消息
             long currentTime=System.currentTimeMillis();
-            // 不能是所有节点，只能是历来的通道的使用者，不能包含当前节点，而且是发送全局节点
-            //for (InetAddress item : hashSetAcceptNode) {
-            //    //shengchen
-            //    AcceptAckMsg oldacceptAckMsgtemp = new AcceptAckMsg(new Host(item,data_port), hostConfigureMap.get(item).highestAcknowledgedInstance);
-            //    if (currentTime-hostConfigureMap.get(item).lastReceiveAckTime>5000){
-            //        for (Host item2 : membership) {
-            //            sendMessage(oldacceptAckMsgtemp, item2);
-            //        }
-            //    }
-            //}
+            // 扫描历来的通道使用者，发送ack请求 
+            // 不能是所有节点，只能是历来的通道的使用者，不能包含当前节点，而且是发送全局节点，Heade
+            for (InetAddress item : hashSetAcceptNode) {
+                // 应该使用accept作为新的ack号
+                AcceptAckMsg oldacceptAckMsgtemp = new AcceptAckMsg(new Host(item,data_port), hostConfigureMap.get(item).highestAcceptedInstance);
+                //判断是否超时
+                if (currentTime-hostConfigureMap.get(item).lastReceiveAckTime>1000){
+                    // 应该向链头发送ack请求，由链头经过链转发至全部节点
+                    sendMessage(oldacceptAckMsgtemp, Head);
+                }
+            }
         }else {//正常地转发，这里使用的节点的配置中的ack序号
             AcceptMsg msg = new AcceptMsg(inst.iN, inst.highestAccept, inst.counter, inst.acceptedValue,
                     acceptNodeRuntimeConfigure.highestAcknowledgedInstance);
@@ -553,22 +542,24 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         InetAddress ackInetAddress=ackHost.getAddress();
         RuntimeConfigure ackHostRuntimeConfigure = hostConfigureMap.get(ackHost.getAddress());
         
+        
         if (msg.instanceNumber <= ackHostRuntimeConfigure.highestAcknowledgedInstance) {
             logger.warn("Ignoring acceptAck of Data for old instance: " + msg+"from"+from);
             return;
         }
-        
+        // 设定上次接收ack的时间
         ackHostRuntimeConfigure.lastReceiveAckTime=System.currentTimeMillis();
         //   执行ack程序，取消++，改为直接赋值 
         ackHostRuntimeConfigure.highestAcknowledgedInstance=msg.instanceNumber;
 
-
+        
         //在接收ack，如果是之前的通道使用者，且这个使用者的ack和accept相等，
         if (!ackInetAddress.equals(accpetNodeInetAddress) && hashSetAcceptNode.contains(ackInetAddress)){
             if (ackHostRuntimeConfigure.highestAcceptedInstance==ackHostRuntimeConfigure.highestAcknowledgedInstance){
                 hashSetAcceptNode.remove(ackHost);
             }
         }
+        // TODO: 2023/8/14 如果自己不是ack中确认节点的发送方，那么要转发ack信息
         // TODO: 2023/8/2 只有这个节点是这条通道的历来使用者，才能使用这条通道发送ack信息 
         // FIXME: 2023/7/19 考虑故障之后，考虑将闹钟要表示是哪个节点的刷新信息
         //这里设置一个定时器,发送acceptack,一段时间没有后续要发的
@@ -577,29 +568,34 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         if (ackHost.equals(self)){
             lastReceiveAckTime=System.currentTimeMillis();
             // TODO: 2023/7/28  不能设置为noop 的0.1s  应该长一点，因为设置为0.5s甚至1s 
-            frontflushMsgTimer=setupTimer(FlushMsgTimer.instance,NOOP_SEND_INTERVAL);
+            //FIXME:   TODO: 2023/8/14  这里尝试条件，应该设定一定条件，才会设定闹钟
+            if (lastReceiveAckTime-lastSendTime>1000){
+                frontflushMsgTimer=setupTimer(FlushMsgTimer.instance,NOOP_SEND_INTERVAL);
+            }
+        }else {
+            // 因为接收不是自己应该对这个ack信息所以需要进行转发，还有应该使用ackHost
+            sendMessage(new AcceptAckMsg(ackHost, ackHostRuntimeConfigure.highestAcknowledgedInstance),nextok);
         }
     }
     
     
     
     /**
-     * 对最后的此节点的消息进行发送ack信息  FlushMsgTimer
+     * 对最后的此节点的消息进行发送ack信息，因为ack消息都是附着在accept消息上，如果没有accept消息，后面的ack没法发送全局  FlushMsgTimer
      */
     private void onFlushMsgTimer(FlushMsgTimer timer, long timerId) {
-        // TODO: 2023/7/28 只能是前链节点才能使用这个功能，不是前链节点取消这个功能 
+        // 为什么需要这个，是当没有accept请求之后，不能传送新ack请求，之后才启动的
+        // 只能是前链节点才能使用这个功能，不是前链节点取消这个功能 
         if (amFrontedNode){
             if (lastReceiveAckTime-lastSendTime>NOOP_SEND_INTERVAL){
-                // TODO: 2023/8/4  这里有问题，因为Data不是全连接的，ack信息应该沿着链传播 
-                // FIXME: 2023/8/4 这里有问题
-                membership.stream().filter(h -> !h.equals(self)).forEach(host -> sendMessage(new AcceptAckMsg(self, selfRuntimeConfigure.highestAcknowledgedInstance), host));
+                //这里有问题，因为Data不是全连接的，ack信息应该沿着链传播 
+                //这里有问题,应该只能发送nextok节点
+                sendMessage(new AcceptAckMsg(self, selfRuntimeConfigure.highestAcknowledgedInstance),nextok);
+                //membership.stream().filter(h -> !h.equals(self)).forEach(host -> sendMessage(new AcceptAckMsg(self, selfRuntimeConfigure.highestAcknowledgedInstance), host));
                 if (logger.isDebugEnabled()) {
-                    logger.debug("向所有节点发送了acceptack为" + hostConfigureMap.get(self).highestAcknowledgedInstance + "的定时信息");
+                    logger.debug("向nextok节点发送了ack为" + hostConfigureMap.get(self).highestAcknowledgedInstance + "的定时信息");
                 }
-                cancelTimer(frontflushMsgTimer);
             }
-        }else {
-            //Nothing
         }
     }
 
@@ -709,6 +705,10 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
             logger.info("New leader connecting: " + leader.getAddress());
             if (!leader.getAddress().equals(self.getAddress()))
                 openConnection(leader, peerChannel);
+            // 自身是leader，开启
+            if (leader.getAddress().equals(self.getAddress())){// 
+                canHandleQequest=true;
+            }
         }
     }
 
@@ -750,11 +750,11 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         if (peer.equals(leader)) {
             // 设置能接收客户端处理
             canHandleQequest = true;
-            // 重发失败的排序消息
+            // 重发失败的排序消息是OrderMsg
             while(!failtoLeaderAppOps.isEmpty()){
                 sendOrEnqueue(failtoLeaderAppOps.poll(),leader);
             }
-            //开始处理暂存的请求：
+            //开始处理暂存的请求：是对Front层的batch的封装
             while(!waitingAppOps.isEmpty()){
                 AppOpBatch appOpBatch = waitingAppOps.poll();
                 // 处理 appOpBatch，可以对其进行操作或输出
@@ -769,10 +769,9 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
             nextokConnected=true;
             logger.info("already Connected to nextok :"+nextok.getAddress());
             // TODO: 2023/8/2 有三种状态： 在join状态不能转发，那在状态迁移状态下能转发实例
-            // 是新加入节点，因为日志信息为空，所以不能转发
-            if(state == TPOChainProto.State.JOINING)
+            if(state == TPOChainProto.State.JOINING)  // 是新加入节点，因为日志信息为空，所以不能转发
                 return;
-            //应该改为所有的通道的使用者,以往的节点重发
+            //应该改为所有的通道的使用者,以往的节点重发，这里不用担心，
             Iterator<InetAddress> iterator = hashSetAcceptNode.iterator();
             while (iterator.hasNext()) {
                 InetAddress element = iterator.next();
@@ -782,11 +781,8 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
                     forward(elementInstanceMap.get(i),element);
                 }
             }
-            //channelUser=frontChain.get(index);
-            //channelUserInstanceMap=instances.get(channelUser);
-            //channelUserRuntimeConfigure=hostConfigureMap.get(channelUser);
-            // 现在的通道使用者重发ack->accept的分发消息
-            if (channelUserRuntimeConfigure!=null){
+            //因为通道使用者后面才赋值，刚开始建立是null， 现在的通道使用者重发ack->accept的分发消息
+            if (channelUserRuntimeConfigure!=null){//为什么要判断，当这条链初始建立时，是没有任何信息的
                 for (int i = channelUserRuntimeConfigure.highestAcknowledgedInstance + 1; i <= channelUserRuntimeConfigure.highestAcceptedInstance; i++) {
                     forward(channelUserInstanceMap.get(i),channelUser);
                 }
@@ -812,7 +808,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
             setupTimer(new ReconnectDataTimer(nextok), 1000);
             return;
         }
-        setupTimer(new ReconnectDataTimer(peer), 1000);
+        //setupTimer(new ReconnectDataTimer(peer), 1000);
     }
 
     /**
@@ -834,7 +830,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
             setupTimer(new ReconnectDataTimer(nextok), 1000);
             return;
         }
-        setupTimer(new ReconnectDataTimer(peer), 1000);
+        //setupTimer(new ReconnectDataTimer(peer), 1000);
     }
 
     
@@ -887,14 +883,16 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         // 满足下方条件只会是排序消息，而不是分发消息
         if (leader!=null && destination.equals(leader)) {
             if (leader.getAddress().equals(self.getAddress())){// 当Leader为自身节点
+                logger.debug("向自己申请排序req");
                 sendRequest(new SubmitOrderMsg((OrderMSg) msg), TPOChainProto.PROTOCOL_ID); 
             }else {
+                logger.debug("向leader发送申请排序消息");
                 sendMessage(msg, TPOChainProto.PROTOCOL_ID,destination);
             }
             return;
         }
         // 对于accept和ack信息,一般来说就是前链节点在接收自己处理的accept信息：
-        if (destination.equals(self)) {//只有在收到front层的消息。处理时需要这个
+        if (destination.equals(self)) {//
             // 在生成accept消息时需要这个方法。
             deliverMessageIn(new MessageInEvent(new BabelMessage(msg, (short) -1, (short) -1), self, peerChannel));
         } else {

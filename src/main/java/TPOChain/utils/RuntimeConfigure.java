@@ -62,11 +62,16 @@ public class RuntimeConfigure {
     /**
      * 链尾节点使用:主要后链链尾用来定时向消息的发送方或系统全局发送ack信息
      * */
-    
+
+
+    // 上一次发送accept消息的时间
+    public long  lastSendAcceptTime=0;
     //  节点在收到这个节点的分发消息的时间
     public long lastAcceptTime=0;    
     //TODO: 2023/7/26 当取对应的前链节点一直不发送对应消息的Ack消息：可能由于前链节点故障，那么有末尾节点向全局发送ack消息
     public long  lastReceiveAckTime=0;
     
     // 还有个当前时间System.currentTimeMillis()  这个与lastReceiveAckTime之差
+    
+
 }

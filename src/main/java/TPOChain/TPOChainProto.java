@@ -953,6 +953,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //设置时钟的触发时间，但在内部使用if判断才执行对应指令
         if (amQuorumLeader) {
             assert waitingAppOps.isEmpty() && waitingMembershipOps.isEmpty();
+            // TODO: 2023/8/14  
             if (System.currentTimeMillis() - lastAcceptTimeCl > NOOP_SEND_INTERVAL)
                 if (logger.isDebugEnabled()){
                     logger.debug("leader 时钟超时自动发送noop消息");
@@ -1116,10 +1117,12 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     public void onSubmitOrderMsg(SubmitOrderMsg not, short from){
         OrderMSg msg=not.getOrdermsg();
         if (amQuorumLeader){//只有leader才能处理这个排序请求
-            // TODO: 2023/8/4 先处理缓存 ，在成为Leader之后
             sendNextAcceptCL(new SortValue(msg.node,msg.iN));
         } else if (supportedLeader().equals(self)){// 当为候选者
             // 将排序请求缓存 
+            if (logger.isDebugEnabled()){
+                logger.debug("暂存从自己Data端过来的消息");
+            }
             waitingAppOps.add(new SortValue(msg.node,msg.iN));
         } else {//对消息进行转发,转发到leader
             sendOrEnqueue(msg,supportedLeader());
