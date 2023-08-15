@@ -953,12 +953,12 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //设置时钟的触发时间，但在内部使用if判断才执行对应指令
         if (amQuorumLeader) {
             assert waitingAppOps.isEmpty() && waitingMembershipOps.isEmpty();
-            // TODO: 2023/8/14  
-            if (System.currentTimeMillis() - lastAcceptTimeCl > NOOP_SEND_INTERVAL)
+            if (System.currentTimeMillis() - lastAcceptTimeCl > NOOP_SEND_INTERVAL){
                 if (logger.isDebugEnabled()){
                     logger.debug("leader 时钟超时自动发送noop消息");
                 }
                 sendNextAcceptCL(new NoOpValue());
+            }
         } else {
             logger.warn(timer + " while not quorumLeader");
             cancelTimer(noOpTimerCL);
@@ -1139,7 +1139,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     private void sendNextAcceptCL(PaxosValue val) {
         // TODO: 2023/7/27 在control端可以判定这个之前的实例是不是发送排序了，没有则生成之前和这次的实例 
         //  若这个实例长时间不存在则空过这个的执行
-        
         
         InstanceStateCL instance;
         if (!globalinstances.containsKey(lastAcceptSentCl + 1)) {
@@ -1331,7 +1330,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         }
         instance.markDecided();
         highestDecidedInstanceCl++;
-        //放入旧的decide值
+        //放入旧的decide值，供执行单位使用
         olddecidequeue.add(highestDecidedInstanceCl);
     }
 
@@ -1476,9 +1475,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                 // 要进行复制机状态的改变，必须获得锁，因为改变状态操作和加入节点申请状态冲突，所以加锁
                 if (instanceCLtemp.acceptedValue.type!= PaxosValue.Type.SORT){
                     // 那消息可能是成员管理消息  也可能是noop消息
-                    synchronized (executeLock){
-                        //
-                    }
+                    
                     highestExecuteInstanceCl++;
                     if (highestExecuteInstanceCl % 200 == 0) {
                         olddexecutequeue.add(highestExecuteInstanceCl);
@@ -1502,9 +1499,11 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                         throw new RuntimeException(e);
                     }
                     if (intancetmp.iN==iNtarget){
-                        synchronized (executeLock){
-                            triggerNotification(new ExecuteBatchNotification(((AppOpBatch) intancetmp.acceptedValue).getBatch()));
-                        }
+                        //synchronized (executeLock){
+                        //    triggerNotification(new ExecuteBatchNotification(((AppOpBatch) intancetmp.acceptedValue).getBatch()));
+                        //}
+                        triggerNotification(new ExecuteBatchNotification(((AppOpBatch) intancetmp.acceptedValue).getBatch()));
+
                         highestExecuteInstanceCl++;
                         if(iNtarget%200==0){
                             hostConfigureMap.get(tempInetAddress).executeFlagQueue.add(iNtarget);
@@ -1515,7 +1514,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                         if (logger.isDebugEnabled()){
                             logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+instanceCLtemp.acceptedValue);
                         }
-                        //触发读
+                        //如果有读挂载，触发读
                         InstanceStateCL finalGlobalInstanceTemp = instanceCLtemp;
                         if(!instanceCLtemp.getAttachedReads().isEmpty()){
                             instanceCLtemp.getAttachedReads().forEach((k, v) -> sendReply(new ExecuteReadReply(v, finalGlobalInstanceTemp.iN), k));

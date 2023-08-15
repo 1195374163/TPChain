@@ -883,10 +883,8 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         // 满足下方条件只会是排序消息，而不是分发消息
         if (leader!=null && destination.equals(leader)) {
             if (leader.getAddress().equals(self.getAddress())){// 当Leader为自身节点
-                logger.debug("向自己申请排序req");
                 sendRequest(new SubmitOrderMsg((OrderMSg) msg), TPOChainProto.PROTOCOL_ID); 
             }else {
-                logger.debug("向leader发送申请排序消息");
                 sendMessage(msg, TPOChainProto.PROTOCOL_ID,destination);
             }
             return;

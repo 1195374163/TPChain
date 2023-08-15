@@ -300,14 +300,14 @@ public class HashMapApp implements Application {
             nWrites++;
             if (local) {
                 opInfo.getRight().writeAndFlush(new ResponseMessage(opInfo.getLeft(), new byte[0]));
-                if(logger.isDebugEnabled()) logger.debug("Responding");
+                //if(logger.isDebugEnabled()) logger.debug("Responding");
             }
         } else { //READ
             if (local) {
                 nReads++;
                 opInfo.getRight().writeAndFlush(
                         new ResponseMessage(opInfo.getLeft(), store.getOrDefault(op.getRequestKey(), new byte[0])));
-                if(logger.isDebugEnabled()) logger.debug("Responding");
+                //if(logger.isDebugEnabled()) logger.debug("Responding");
             } //If remote read, nothing to do
         }
     }
