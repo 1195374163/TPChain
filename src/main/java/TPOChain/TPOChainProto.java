@@ -1089,19 +1089,21 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      *  其他节点的data端发过来OrderMsg信息，在这里接收
      */
     private void uponOrderMSg(OrderMSg msg, Host from, short sourceProto, int channel) {
+        generateSortValue(msg);
+        return;
         // 还有一种情况，当是候选者 ？已解决：排序请求不需要有候选者，因为Data层在旧Leader死机时，停止发送排序请求
-        if (amQuorumLeader){//只有leader才能处理这个排序请求
-            //if (logger.isDebugEnabled()){
-            //    logger.debug("我是leader,收到"+from+"的"+msg+"开始sendNextAcceptCL()");
-            //}
-            sendNextAcceptCL(new SortValue(msg.node,msg.iN));
-        }else if (supportedLeader().equals(self)){// 当为候选者
-            // 将排序请求缓存
-            waitingAppOps.add(new SortValue(msg.node,msg.iN));
-        } else {//对消息进行转发,转发到leader
-            sendOrEnqueue(msg,supportedLeader());
-            logger.warn("not leader but receive OrderMSg msg");
-        }
+        //if (amQuorumLeader){//只有leader才能处理这个排序请求
+        //    //if (logger.isDebugEnabled()){
+        //    //    logger.debug("我是leader,收到"+from+"的"+msg+"开始sendNextAcceptCL()");
+        //    //}
+        //    sendNextAcceptCL(new SortValue(msg.node,msg.iN));
+        //}else if (supportedLeader().equals(self)){// 当为候选者
+        //    // 将排序请求缓存
+        //    waitingAppOps.add(new SortValue(msg.node,msg.iN));
+        //} else {//对消息进行转发,转发到leader
+        //    sendOrEnqueue(msg,supportedLeader());
+        //    logger.warn("not leader but receive OrderMSg msg");
+        //}
     }
 
 
@@ -1110,20 +1112,48 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      */
     public void onSubmitOrderMsg(SubmitOrderMsg not, short from){
         OrderMSg msg=not.getOrdermsg();
-        if (amQuorumLeader){//只有leader才能处理这个排序请求
-            sendNextAcceptCL(new SortValue(msg.node,msg.iN));
-        } else if (supportedLeader().equals(self)){// 当为候选者
-            // 将排序请求缓存 
-            if (logger.isDebugEnabled()){
-                logger.debug("暂存从自己Data端过来的消息");
+        generateSortValue(msg);
+        return;
+        
+        //if (amQuorumLeader){//只有leader才能处理这个排序请求
+        //    sendNextAcceptCL(new SortValue(msg.node,msg.iN));
+        //} else if (supportedLeader().equals(self)){// 当为候选者
+        //    // 将排序请求缓存 
+        //    if (logger.isDebugEnabled()){
+        //        logger.debug("暂存从自己Data端过来的消息");
+        //    }
+        //    waitingAppOps.add(new SortValue(msg.node,msg.iN));
+        //} else {//对消息进行转发,转发到leader
+        //    sendOrEnqueue(msg,supportedLeader());
+        //    logger.warn("not leader but receive SubmitOrderMsg ipc");
+        //}
+    }
+    // 暂存排序项
+    public  List<SortItem> sortitembuffer=new ArrayList<>(10);
+    // TODO: 2023/8/16  将排序使用批处理使用 10个批处理
+    public void  generateSortValue(OrderMSg msg){
+        Host node=msg.node;
+        int iN =msg.iN;       
+        sortitembuffer.add(new SortItem(node,iN));
+        if (sortitembuffer.size()>=10){
+            if (amQuorumLeader){//只有leader才能处理这个排序请求
+                sendNextAcceptCL(new SortValue(sortitembuffer));
+            } else if (supportedLeader().equals(self)){// 当为候选者
+                // 将排序请求缓存 
+                if (logger.isDebugEnabled()){
+                    logger.debug("暂存从自己Data端过来的消息");
+                }
+                waitingAppOps.add(new SortValue(sortitembuffer));
+            } else {//对消息进行转发,转发到leader
+                sendOrEnqueue(msg,supportedLeader());
+                logger.warn("not leader but receive SubmitOrderMsg ipc");
             }
-            waitingAppOps.add(new SortValue(msg.node,msg.iN));
-        } else {//对消息进行转发,转发到leader
-            sendOrEnqueue(msg,supportedLeader());
-            logger.warn("not leader but receive SubmitOrderMsg ipc");
+            // 重新初始化
+            sortitembuffer=new ArrayList(10);
         }
     }
-    // TODO: 2023/8/16  将排序使用批处理使用 10个批处理
+    
+    
     
     // TODO: 2023/7/19  noop太多，也影响性能，因为无效信息太多了，挤压正常信息的处理 ;但是太少也不行(读依附在一定数量的noop消息)同时noop附带的前链节点上次的ack请求，然后执行，是否可以将noop与其他消息并行处理
     
@@ -1484,40 +1514,39 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                     }
                 }else {// 是排序消息
                     SortValue sortTarget= (SortValue)instanceCLtemp.acceptedValue;
-                    // 得到是哪个局部日志
-                    InetAddress tempInetAddress=sortTarget.getNode().getAddress();
-                    // 得到是局部日志的哪个实例项
-                    int  iNtarget=sortTarget.getiN();
-                    // 是命令的实体
-                    InstanceState  intancetmp= null;
-                    try {
-                        intancetmp = hostMessageQueue.get(tempInetAddress).take();
-                    } catch (InterruptedException e) {
-                        throw new RuntimeException(e);
+                    List<SortItem> batch=sortTarget.getSortItemsbatch();
+                    for (SortItem tempItem:batch) {
+                        // 得到是哪个局部日志
+                        InetAddress tempInetAddress=tempItem.getNode().getAddress();
+                        // 得到是局部日志的哪个实例项
+                        int  iNtarget=tempItem.getiN();
+                        // 是命令的实体
+                        InstanceState  intancetmp= null;
+                        try {
+                            intancetmp = hostMessageQueue.get(tempInetAddress).take();
+                        } catch (InterruptedException e) {
+                            throw new RuntimeException(e);
+                        }
+                        if (intancetmp.iN==iNtarget){
+                            triggerNotification(new ExecuteBatchNotification(((AppOpBatch) intancetmp.acceptedValue).getBatch()));
+                            if(iNtarget%1000==0){
+                                hostConfigureMap.get(tempInetAddress).executeFlagQueue.add(iNtarget);
+                            }
+                        } else {
+                            throw new AssertionError("消息队列出错，执行的不是所期望的 ");
+                        }
                     }
-                    if (intancetmp.iN==iNtarget){
-                        //synchronized (executeLock){
-                        //    triggerNotification(new ExecuteBatchNotification(((AppOpBatch) intancetmp.acceptedValue).getBatch()));
-                        //}
-                        triggerNotification(new ExecuteBatchNotification(((AppOpBatch) intancetmp.acceptedValue).getBatch()));
-
-                        highestExecuteInstanceCl++;
-                        if(iNtarget%200==0){
-                            hostConfigureMap.get(tempInetAddress).executeFlagQueue.add(iNtarget);
-                        }
-                        if (highestExecuteInstanceCl % 200 == 0) {
-                            olddexecutequeue.add(highestExecuteInstanceCl);
-                        }
-                        if (logger.isDebugEnabled()){
-                            logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+instanceCLtemp.acceptedValue);
-                        }
-                        //如果有读挂载，触发读
-                        InstanceStateCL finalGlobalInstanceTemp = instanceCLtemp;
-                        if(!instanceCLtemp.getAttachedReads().isEmpty()){
-                            instanceCLtemp.getAttachedReads().forEach((k, v) -> sendReply(new ExecuteReadReply(v, finalGlobalInstanceTemp.iN), k));
-                        }
-                    } else {
-                        throw new AssertionError("消息队列出错，执行的不是所期望的 ");
+                    highestExecuteInstanceCl++;
+                    if (highestExecuteInstanceCl % 1000 == 0) {
+                        olddexecutequeue.add(highestExecuteInstanceCl);
+                    }
+                    if (logger.isDebugEnabled()){
+                        logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+instanceCLtemp.acceptedValue);
+                    }
+                    //如果有读挂载，触发读
+                    InstanceStateCL finalGlobalInstanceTemp = instanceCLtemp;
+                    if(!instanceCLtemp.getAttachedReads().isEmpty()){
+                        instanceCLtemp.getAttachedReads().forEach((k, v) -> sendReply(new ExecuteReadReply(v, finalGlobalInstanceTemp.iN), k));
                     }
                 }
             }

@@ -9,7 +9,6 @@ import java.util.*;
 // 全局日志条目：
 // leader除了发送SortPaxos排序消息，还有成员的更改消息即MembershipOP，还有NOOP消息，
 
-
 public class InstanceStateCL {
 
     public final int iN;
