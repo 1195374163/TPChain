@@ -49,6 +49,8 @@ public class AcceptCLMsg extends ProtoMessage {
             msg.sN.serialize(out);
             out.writeShort(msg.nodeCounter);
             out.writeInt(msg.ack);
+            
+            
             PaxosValue.serializer.serialize(msg.value, out);
         }
         
@@ -57,6 +59,9 @@ public class AcceptCLMsg extends ProtoMessage {
             SeqN sN = SeqN.deserialize(in);
             short nodeCount = in.readShort();
             int ack = in.readInt();
+            
+            
+            
             PaxosValue payload = PaxosValue.serializer.deserialize(in);
             return new AcceptCLMsg(instanceNumber, sN, nodeCount,payload,ack);
         }
