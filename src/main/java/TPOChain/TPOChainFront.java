@@ -1,5 +1,6 @@
 package TPOChain;
 
+import TPOChain.messages.JoinRequestMsg;
 import TPOChain.notifications.FrontIndexNotification;
 import frontend.FrontendProto;
 import app.Application;
@@ -48,7 +49,7 @@ public class TPOChainFront extends FrontendProto {
     
     
     
-    //Forwarded 对于已经发送下层协议的批处理，备份保存，之后调用处来
+    //Forwarded 对于已经发送下层协议的批处理，备份保存，之后调用处，使用这个队列出队执行
     private final Queue<Pair<Long, OpBatch>> pendingWrites;
     // 读缓存，是不发往Control层和其他节点的，只发一个标识
     private final Queue<Pair<Long, List<byte[]>>> pendingReads;
@@ -57,8 +58,11 @@ public class TPOChainFront extends FrontendProto {
 
     // 一个向WrieTo发送失败队列：元素应该是发送的peerBatchMessage
     private Queue<PeerBatchMessage>  failWrites= new LinkedList<>();
-    // 一个缓存，在writTo不可连接的暂存队列
+    // 一个缓存，暂存在writTo不可连接的暂存队列
     private Queue<PeerBatchMessage>  waitWrites= new LinkedList<>();
+
+    // 一个缓存，在上一个通道的消息批没有处理完毕的暂存队列
+    private Queue<PeerBatchMessage>  waitBatchWrites= new LinkedList<>();
     
     
     
@@ -67,7 +71,7 @@ public class TPOChainFront extends FrontendProto {
     private final Object writeLock = new Object();
     
     
-    //消息的发往地，是一个Host
+    //消息的发往地，是一个Host，后链的挂载节点，前链是自身
     private Host writesTo;
     private boolean writesToConnected;
     
@@ -86,8 +90,17 @@ public class TPOChainFront extends FrontendProto {
     
     // Front使用哪个编号的Data通道
     private  int index;
+    
 
-
+    // 上次发送的Batch id  
+    public long  lastSentBatchid;
+    // 上次执行的batch id
+    public long  lastExecuteBatchid;
+    // TODO: 2023/8/17 初始状态是true,在发生挂载WriteTo变迁之后，变为false，在执行上一个通道的批之后，再变为false， 
+    public boolean canSendToWriteTo;
+    
+    
+    
     public TPOChainFront(Properties props, short protoIndex, Application app) throws IOException {
         super(PROTOCOL_NAME_BASE + protoIndex, (short) (PROTOCOL_ID_BASE + protoIndex),
                 props, protoIndex, app);
@@ -100,6 +113,13 @@ public class TPOChainFront extends FrontendProto {
         //象征着leader,这里是挂载的前链节点
         writesTo = null;
         writesToConnected = false;
+
+
+        // 初始状态为-1
+        lastSentBatchid=-1;
+        lastExecuteBatchid=-1;
+
+        canSendToWriteTo=true;
         
         //缓存用户端来的请求达成批处理
         writeDataBuffer = new ArrayList<>(BATCH_SIZE);
@@ -141,7 +161,7 @@ public class TPOChainFront extends FrontendProto {
         
         final int minTimer = Math.min(LOCAL_BATCH_INTERVAL, BATCH_INTERVAL);
         setupPeriodicTimer(new BatchTimer(), minTimer, minTimer);
-
+        
         
         registerTimerHandler(ReconnectTimer.TIMER_ID, this::onReconnectTimer);
         
@@ -195,11 +215,10 @@ public class TPOChainFront extends FrontendProto {
     private void sendNewWriteBatch() {
         long internalId = nextId();//nextId()生成了关于本地ip的有序列数
         OpBatch batch = new OpBatch(internalId, self, getProtoId(), writeDataBuffer);
+        
         pendingWrites.add(Pair.of(internalId, batch));
-        
-        writeDataBuffer = new ArrayList<>(BATCH_SIZE);//对缓存进行清空
+        writeDataBuffer = new ArrayList<>(BATCH_SIZE);//重新生成一个新缓存空间
         sendBatchToWritesTo(new PeerBatchMessage(batch));
-        
         // 设置上次的发送时间
         lastWriteBatchTime = System.currentTimeMillis();
     }
@@ -209,22 +228,29 @@ public class TPOChainFront extends FrontendProto {
      * 将写信息转发至writeTo即leader处理，直接调用到这里截止，后面都是异步完成
      * */
     private void sendBatchToWritesTo(PeerBatchMessage msg) {
-        //logger.info("发送"+msg+"到"+writesTo);
-        if (writesTo.getAddress().equals(self)) {
-            // 原来直接使用
-            //onPeerBatchMessage(msg, writesTo, getProtoId(), peerChannel);
-            deliverMessageIn(new MessageInEvent(new BabelMessage(msg,getProtoId(),getProtoId()) ,new Host(self,PEER_PORT),peerChannel));
-            return ;
-        }  
-        if (writesToConnected){//如果连接到挂载点，进行发送
-            sendMessage(peerChannel, msg, writesTo);
-        }else { // 挂载点还没有连接，暂存消息
-            waitWrites.add(msg);
+        if (canSendToWriteTo){//因为更换通道需要上次通道的消息批执行完毕，才可以发送下一个节点
+            //logger.info("发送"+msg+"到"+writesTo);
+            if (writesTo.getAddress().equals(self)) {
+                // 原来直接使用，现在解耦，以消息传输，异步完成
+                //onPeerBatchMessage(msg, writesTo, getProtoId(), peerChannel);
+                deliverMessageIn(new MessageInEvent(new BabelMessage(msg,getProtoId(),getProtoId()) ,new Host(self,PEER_PORT),peerChannel));
+                // 记录上次发送的batchid
+                lastSentBatchid=msg.getBatch().getBatchId();
+                return ;
+            }
+            if (writesToConnected){//如果连接到挂载点，进行发送
+                sendMessage(peerChannel, msg, writesTo);
+            }else { //挂载点还没有建立连接，暂存消息
+                waitWrites.add(msg);
+            }
+        }else{//上一个通道的消息还没有处理完毕,下面是新一轮通道的
+            waitBatchWrites.add(msg);
         }
     }
     
-    // 这个只能是前链节点调用,接收自身或挂载在自身节点的后链节点的Msg
     
+    
+    // 这个只能是前链节点调用,接收自身或挂载在自身节点的后链节点的Msg
     /**
      * 连接下层的通道 将消息转发给下层的协议层
      * 只传递写的batch信息到protocol层 发送 TPOChainProto的submitBatchRequest
@@ -235,7 +261,15 @@ public class TPOChainFront extends FrontendProto {
         sendRequest(new SubmitBatchRequest(msg.getBatch()),(short)(TPOChainData.PROTOCOL_ID+index));
         // 能到这里肯定是前链节点，不需要
     }
-
+    
+    
+    /**
+     * 在成功发送完peerBatchMessage之后
+     * */
+    protected void uponPeerBatchMessageOut(PeerBatchMessage msg, Host from, short sProto, int channel) {
+        lastSentBatchid=msg.getBatch().getBatchId();
+    }
+    
     
     //---------------读-----------------
     
@@ -297,16 +331,19 @@ public class TPOChainFront extends FrontendProto {
         if (peer.equals(writesTo)) {
             writesToConnected = true;
             logger.debug("Connected to writesTo " + event);
-            while (!failWrites.isEmpty()) {
-                // 从队列头部取出元素并进行处理
-                PeerBatchMessage element = failWrites.poll();
-                sendBatchToWritesTo(element);
-            }
-            //转发暂存的队列
-            while (!waitWrites.isEmpty()) {
-                // 从队列头部取出元素并进行处理
-                PeerBatchMessage element = waitWrites.poll();
-                sendBatchToWritesTo(element);
+            // 当通道没有转换时处理这个
+            if (canSendToWriteTo){
+                while (!failWrites.isEmpty()) {
+                    // 从队列头部取出元素并进行处理
+                    PeerBatchMessage element = failWrites.poll();
+                    sendBatchToWritesTo(element);
+                }
+                //转发暂存的队列
+                while (!waitWrites.isEmpty()) {
+                    // 从队列头部取出元素并进行处理
+                    PeerBatchMessage element = waitWrites.poll();
+                    sendBatchToWritesTo(element);
+                }
             }
             // 注释掉下面这个 //不会重复吗 ？
             //pendingWrites.forEach(b -> sendBatchToWritesTo(new PeerBatchMessage(b.getRight())));
@@ -379,8 +416,27 @@ public class TPOChainFront extends FrontendProto {
                 logger.error("Expected " + not.getBatch().getBatchId() + ". Got " + ops + "\n" +
                         pendingWrites.stream().map(Pair::getKey).collect(Collectors.toList()));
                 throw new AssertionError("Expected " + not.getBatch().getBatchId() + ". Got " + ops);
-            }                                     
+            }
             not.getBatch().getOps().forEach(op -> app.executeOperation(op, true, not.getInstId()));
+            lastExecuteBatchid=not.getBatch().getBatchId();
+            if (!canSendToWriteTo  && lastExecuteBatchid == lastSentBatchid){
+                canSendToWriteTo=true;
+                while (!failWrites.isEmpty()) {
+                    // 从队列头部取出元素并进行处理
+                    PeerBatchMessage element = failWrites.poll();
+                    sendBatchToWritesTo(element);
+                }
+                //转发暂存的队列
+                while (!waitWrites.isEmpty()) {
+                    // 从队列头部取出元素并进行处理
+                    PeerBatchMessage element = waitWrites.poll();
+                    sendBatchToWritesTo(element);
+                }
+                while (!waitBatchWrites.isEmpty()){
+                    PeerBatchMessage msg = waitBatchWrites.poll();
+                    sendBatchToWritesTo(msg);
+                }
+            }
         } else {
             not.getBatch().getOps().forEach(op -> app.executeOperation(op, false, not.getInstId()));
         }
@@ -416,38 +472,44 @@ public class TPOChainFront extends FrontendProto {
      * logger.info("New writesTo: " + writesTo.getAddress());
      * */
     protected void onMembershipChange(MembershipChange notification, short emitterId) {
-        // TODO: 2023/8/13 这里改变数据通道的指向 
+        //  这里改变数据通道的指向 
         this.index=notification.getIndex();//改变分发消息的通道指向 
      
         //update membership and responder
         membership = notification.getOrderedMembers();
         
-        //Writes to changed
-        if (writesTo == null || !notification.getWritesTo().equals(writesTo.getAddress())) {
-            //Close old writesTo
-            if (writesTo != null && !writesTo.getAddress().equals(self)) {
-                writesToConnected = false;
-                closeConnection(writesTo, peerChannel);
-            }
+        // 初始化使用这个
+        if (writesTo == null){
             //Update and open to new writesTo
             writesTo = new Host(notification.getWritesTo(), PEER_PORT);
             logger.info("New mount: " + writesTo.getAddress());
             // 更换挂载点
-            if (!writesTo.getAddress().equals(self)){
+            if (!writesTo.getAddress().equals(self)){//如果不等于自身节点
                 openConnection(writesTo, peerChannel);
-            }else {
-                // 这个说明前链节点是自身节点对失败的节点处理
-                while (!failWrites.isEmpty()) {
-                    // 从队列头部取出元素并进行处理
-                    PeerBatchMessage msg = failWrites.poll();
-                    deliverMessageIn(new MessageInEvent(new BabelMessage(msg,getProtoId(),getProtoId()) ,new Host(self,PEER_PORT),peerChannel));
-                }
-                //转发暂存的队列
-                while (!waitWrites.isEmpty()) {
-                    // 从队列头部取出元素并进行处理
-                    PeerBatchMessage msg = waitWrites.poll();
-                    deliverMessageIn(new MessageInEvent(new BabelMessage(msg,getProtoId(),getProtoId()) ,new Host(self,PEER_PORT),peerChannel));
-                }
+            }
+            canSendToWriteTo=true;
+            return;
+        }
+        
+        //Writes to changed
+        if (!notification.getWritesTo().equals(writesTo.getAddress())) {
+            //这个意思是换通道了，不能进行响应了
+            canSendToWriteTo=false;
+            
+            
+            //Close old writesTo
+            if (!writesTo.getAddress().equals(self)) {
+                writesToConnected = false;
+                closeConnection(writesTo, peerChannel);
+            }
+            
+            
+            //Update and open to new writesTo
+            writesTo = new Host(notification.getWritesTo(), PEER_PORT);
+            logger.info("New mount: " + writesTo.getAddress());
+            // 更换挂载点
+            if (!writesTo.getAddress().equals(self)){//如果不等于自身节点
+                openConnection(writesTo, peerChannel);
             }
         }
     }

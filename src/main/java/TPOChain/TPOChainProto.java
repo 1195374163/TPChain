@@ -473,6 +473,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         // 接收从data层的排序request
         registerRequestHandler(SubmitOrderMsg.REQUEST_ID, this::onSubmitOrderMsg);
         
+        
         //接收来自front的 状态 答复
         registerReplyHandler(DeliverSnapshotReply.REPLY_ID, this::onDeliverSnapshot);
 
@@ -1114,7 +1115,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         OrderMSg msg=not.getOrdermsg();
         generateSortValue(msg);
         return;
-        
         //if (amQuorumLeader){//只有leader才能处理这个排序请求
         //    sendNextAcceptCL(new SortValue(msg.node,msg.iN));
         //} else if (supportedLeader().equals(self)){// 当为候选者
@@ -1128,13 +1128,22 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //    logger.warn("not leader but receive SubmitOrderMsg ipc");
         //}
     }
-    // 暂存排序项
+    // 暂存排序项，指定为10个排序请求为一个批处理
     public  List<SortItem> sortitembuffer=new ArrayList<>(10);
-    // TODO: 2023/8/16  将排序使用批处理使用 10个批处理
+    
+    // 将排序使用批处理使用 10个批处理
     public void  generateSortValue(OrderMSg msg){
         Host node=msg.node;
-        int iN =msg.iN;       
+        int iN =msg.iN;
+        // 判断是否是重复消息
+        if ( hostConfigureMap.get(node).lastOrder>=iN){
+            logger.debug("丢弃过时的排序请求"+node+"的"+iN);
+            return;
+        }
         sortitembuffer.add(new SortItem(node,iN));
+        
+        hostConfigureMap.get(node).lastOrder=iN;
+        
         if (sortitembuffer.size()>=10){
             if (amQuorumLeader){//只有leader才能处理这个排序请求
                 sendNextAcceptCL(new SortValue(sortitembuffer));
@@ -1148,7 +1157,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                 sendOrEnqueue(msg,supportedLeader());
                 logger.warn("not leader but receive SubmitOrderMsg ipc");
             }
-            // 重新初始化
+            // 重新指向新对象
             sortitembuffer=new ArrayList(10);
         }
     }
@@ -1529,6 +1538,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                         }
                         if (intancetmp.iN==iNtarget){
                             triggerNotification(new ExecuteBatchNotification(((AppOpBatch) intancetmp.acceptedValue).getBatch()));
+                            hostConfigureMap.get(tempInetAddress).highestExecutedInstance=iNtarget;
                             if(iNtarget%1000==0){
                                 hostConfigureMap.get(tempInetAddress).executeFlagQueue.add(iNtarget);
                             }

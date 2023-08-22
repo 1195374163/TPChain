@@ -1,5 +1,6 @@
 package frontend;
 
+import TPOChain.messages.JoinRequestMsg;
 import app.Application;
 import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
 import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
@@ -87,9 +88,11 @@ public abstract class FrontendProto extends GenericProtocol {
         
         registerMessageSerializer(peerChannel, PeerBatchMessage.MSG_CODE, PeerBatchMessage.serializer);
 
-        registerMessageHandler(peerChannel, PeerBatchMessage.MSG_CODE, this::onPeerBatchMessage, this::uponMessageFailed);
+        // 转发batch到挂载节点之后的设置发送成功之后消息处理
+        registerMessageHandler(peerChannel, PeerBatchMessage.MSG_CODE, this::onPeerBatchMessage,this::uponPeerBatchMessageOut ,this::uponMessageFailed);
+       
+   
 
-        
 
         registerChannelEventHandler(peerChannel, InConnectionDown.EVENT_ID, this::onInConnectionDown);
         registerChannelEventHandler(peerChannel, InConnectionUp.EVENT_ID, this::onInConnectionUp);
@@ -97,21 +100,23 @@ public abstract class FrontendProto extends GenericProtocol {
         registerChannelEventHandler(peerChannel, OutConnectionUp.EVENT_ID, this::onOutConnectionUp);
         registerChannelEventHandler(peerChannel, OutConnectionFailed.EVENT_ID, this::onOutConnectionFailed);
 
-        //Consensus
+        //Consensus------成员更改和 写请求
         subscribeNotification(MembershipChange.NOTIFICATION_ID, this::onMembershipChange);
         subscribeNotification(ExecuteBatchNotification.NOTIFICATION_ID, this::onExecuteBatch);
         
         //----------------新加入节点使用
         subscribeNotification(InstallSnapshotNotification.NOTIFICATION_ID, this::onInstallSnapshot);
         
-        //接收来自proto的请求state的请求
+        //接收来自proto的请求state的请求----
         registerRequestHandler(GetSnapshotRequest.REQUEST_ID, this::onGetStateSnapshot);
        
        
         _init(props);
     }
 
-    
+
+
+
     protected abstract void _init(Properties props) throws HandlerRegistrationException;
 
     
@@ -141,7 +146,9 @@ public abstract class FrontendProto extends GenericProtocol {
      * */
     protected abstract void onPeerBatchMessage(PeerBatchMessage msg, Host from, short sProto, int channel);
 
-    
+    protected void uponPeerBatchMessageOut(PeerBatchMessage msg, Host from, short sProto, int channel) {
+        
+    }
     
     
     protected abstract void onOutConnectionUp(OutConnectionUp event, int channel);

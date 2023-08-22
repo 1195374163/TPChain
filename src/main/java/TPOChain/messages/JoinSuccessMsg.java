@@ -21,11 +21,17 @@ public class JoinSuccessMsg extends ProtoMessage {
     public final int iN;
     public final SeqN sN;
     public final List<Host> membership;
+    // TODO: 2023/8/21  挂载列表  需要传输给新节点 
     public  HashSet<Host> pendingRemove;
     // TODO: 2023/5/23  对日志改成 acceptValue和acceptedValueCl来传输，传输日志消息 ，以一个列表传输，不以消息传输
     public  Map<Host, RuntimeConfigure>  hostConfigureMap;
+    // 以List集合收集
     public  Map<Host,Map<Integer, InstanceState>> instances;
     public  Map<Integer, InstanceStateCL> globalinstances;
+    
+    
+    
+    
     
     public  int executeid;
     public  int ackid;

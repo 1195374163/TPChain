@@ -337,6 +337,16 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
         } else //忽视接受的消息
             logger.warn("Received " + not + " without being FrontedNode, ignoring.");
     }
+
+
+    
+    
+    // TODO: 2023/8/21 应该有一个成为分发节点的函数
+    public  void  beacomeFrontNode(){
+        // TODO: 2023/8/21  
+        
+        
+    }
     
     
     
