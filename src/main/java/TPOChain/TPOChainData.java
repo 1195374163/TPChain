@@ -1,10 +1,7 @@
 package TPOChain;
 
 import TPOChain.ipc.SubmitOrderMsg;
-import TPOChain.messages.AcceptAckMsg;
-import TPOChain.messages.AcceptMsg;
-import TPOChain.messages.OrderMSg;
-import TPOChain.messages.UnaffiliatedMsg;
+import TPOChain.messages.*;
 import TPOChain.notifications.*;
 import TPOChain.timers.FlushMsgTimer;
 import TPOChain.timers.ReconnectDataTimer;
@@ -117,6 +114,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     // 删除：当收到这个节点的ack达到accpt数且新的通道使用者不是这个节点，这个可以删除
     private final Set<InetAddress> hashSetAcceptNode = new HashSet<>();
 
+    
     
     //根据从TPOChainProto传过来的前链节点分析当前通道的使用者
     private  InetAddress  channelUser;
@@ -302,15 +300,84 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
             for (int i=temp.highestGCInstance+1;i<min;i++){
                 if (temp.highestGCInstance< min){
                     tempMap.remove(i);
+                    //将上面的++ 改为实例号的直接赋值 
                     temp.highestGCInstance=i;
-                    // TODO: 2023/7/31 将上面的++ 改为实例号的直接赋值 
                 }
             }
         }
     }
 
 
+    
+    // TODO: 2023/8/22 考虑初始情况和后续前链节点更改 
+    public  void  tryToBeFrontNode(){
+        // TODO: 2023/8/22  连接所有其他节点
+        logger.info("Attempting to take leadership...");
+        //为什么是ack信息，保证日志的连续
+        //InstanceStateCL instance = globalinstances.computeIfAbsent(highestAcknowledgedInstanceCl + 1, InstanceStateCL::new);
+        InstanceStateCL instance;
+        if (!globalinstances.containsKey(highestAcknowledgedInstanceCl + 1)) {
+            instance=new InstanceStateCL(highestAcknowledgedInstanceCl + 1);
+            globalinstances.put(highestAcknowledgedInstanceCl + 1, instance);
+        }else {
+            instance=globalinstances.get(highestAcknowledgedInstanceCl + 1);
+        }
 
+        //private Map.Entry<Integer, SeqN> currentSN是
+        //currentSN初始值是new AbstractMap.SimpleEntry<>(-1, new SeqN(-1, null));
+        SeqN newSeqN = new SeqN(currentSN.getValue().getCounter() + 1, self);
+        //生成对应序号的prepareok的Map
+        instance.prepareResponses.put(newSeqN, new HashSet<>());
+
+
+        PrepareMsg pMsg = new PrepareMsg(instance.iN, newSeqN);
+        //这是对所有节点包括自己发送prepare消息
+        // TODO: 2023/8/2 因为只有前链节点能选举，所以Maybe只需要向前链节点发送prepare 
+        membership.getMembers().forEach(h -> sendOrEnqueue(pMsg, h));
+    }
+    
+    
+
+    // TODO: 2023/8/22  Head需要连接所有其他节点，其他节点除了nextok节点，还需要连接Heade节点
+    public void  uponOldChannelUserMsg(){
+        
+    }
+    
+    // TODO: 2023/8/22 分为初始情况 和 更改情况后
+    /**
+     * 接收旧通道使用者的旧消息，再转发。
+     * */
+    public  void  uponQueryOldChannelUserMsg(QueryOldChannelUserMsg msg, Host from, short sourceProto, int channel){
+
+
+    }
+    
+    
+    // TODO: 2023/8/21 应该有一个成为分发节点的函数,向其他节点请求prepareOk信息。
+    public  void  beacomeFrontNode(){
+        // TODO: 2023/8/21  应该将上一个通道的消息转发完毕
+        // 从
+
+    }
+
+
+    
+    // TODO: 2023/8/22 每个节点与Head建立连接，发完之后，断开连接，
+    //  Head不能是自身节点，
+    public void sendAcceptValueToHead(){
+        openConnection(Head, peerChannel);
+    }
+
+    /**
+     * 在发送完这个消息之后关闭与Head的连接
+     * */
+    public  void  uponOldChannelUserMsgOut(PrepareMsg msg, Host from, short sourceProto, int channel){
+        closeConnection(Head, peerChannel);
+    }
+
+    
+    
+    
     
     
 
@@ -320,6 +387,9 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
      * 当前时leader或正在竞选leader的情况下处理frontend的提交batch
      */
     public void onSubmitBatch(SubmitBatchRequest not, short from) {
+        // TODO: 2023/8/22 应该设置一个发送旧通道使用者的所有消息之后才能转发新的消息
+        
+        
         if (amFrontedNode) {// 改为前链节点 
             if (canHandleQequest) {//这个标志意味着leader存在
                 //先将以往的消息转发，还有其他候选者节点存储的消息在连接建立时处理
@@ -339,16 +409,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     }
 
 
-    
-    
-    // TODO: 2023/8/21 应该有一个成为分发节点的函数
-    public  void  beacomeFrontNode(){
-        // TODO: 2023/8/21  
-        
-        
-    }
-    
-    
+
     
 
     /**-----------------------------处理节点的分发信息-------------------------------**/
@@ -538,7 +599,7 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     
     
     
-    //-------------接收ack信息---------------------------------------
+    //-----接收ack信息-----------ack信息也能单独沿着链传播----
     
     /**
      * leader接收ack信息，对实例进行ack
@@ -695,8 +756,12 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
             logger.info("New nextok connecting: " + nextok.getAddress());
             if (!nextok.getAddress().equals(self.getAddress()))
                 openConnection(nextok, peerChannel);
+        } // 否则不改变nextok指向
+
+        // TODO: 2023/8/23 开启与其他节点的使用， 
+        if (){
+            
         }
-        // 否则不改变nextok指向
     }
 
     

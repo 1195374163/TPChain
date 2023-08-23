@@ -10,21 +10,18 @@ import java.io.IOException;
 public class AcceptedValue {
     public final int instance;
     public final SeqN sN;
-    
     public final PaxosValue value;
-
     public AcceptedValue(int instance, SeqN sN, PaxosValue value) {
         this.instance = instance;
         this.sN = sN;
         this.value = value;
     }
-
     @Override
     public String toString() {
-        return "AV{" +
+        return "AcceptedValue{" +
                 "i=" + instance +
                 ", sn=" + sN +
-                ", v=" + value +
+                ", value=" + value +
                 '}';
     }
 
