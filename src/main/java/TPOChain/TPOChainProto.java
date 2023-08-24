@@ -1163,7 +1163,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     }
     
     
-    
     // TODO: 2023/7/19  noop太多，也影响性能，因为无效信息太多了，挤压正常信息的处理 ;但是太少也不行(读依附在一定数量的noop消息)同时noop附带的前链节点上次的ack请求，然后执行，是否可以将noop与其他消息并行处理
     
     /**
@@ -1219,7 +1218,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //更新上次操作时间
         lastAcceptTimeCl = System.currentTimeMillis();
     }
-    
     
     
     // 上面那三个方法是Leader节点使用，下面的是
@@ -1312,7 +1310,12 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         MembershipOp op = (MembershipOp) inst.acceptedValue;
         //这里封装了实现细节：实际改变了物理链：那么需要重新调整 逻辑控制链和数据通道链；Leader宕机是不会走这个流程，那么只有两种情况
         membership.addToPendingRemoval(op.affectedHost);
-          
+
+        // TODO: 2023/8/23  没有重新赋值nextok节点吗 
+        
+        //members.
+        //nextOK;
+        
         //通知应该改变Front层，
         triggerMembershipChangeNotification();
         // TODO: 2023/8/3 因为后链节点的Front挂载在对应前链节点，当 
