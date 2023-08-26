@@ -1312,7 +1312,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         membership.addToPendingRemoval(op.affectedHost);
 
         // TODO: 2023/8/23  没有重新赋值nextok节点吗 
-        
+        // FIXME: 2023/8/25  重发一些，ack+1到accept的消息
         //members.
         //nextOK;
         

@@ -252,7 +252,7 @@ public class TPOChainFront extends FrontendProto {
     
     // 这个只能是前链节点调用,接收自身或挂载在自身节点的后链节点的Msg
     /**
-     * 连接下层的通道 将消息转发给下层的协议层
+     * 接收PeerBatchMsg的处理函数：连接下层的通道 将消息转发给下层的协议层
      * 只传递写的batch信息到protocol层 发送 TPOChainProto的submitBatchRequest
      * **/
     protected void onPeerBatchMessage(PeerBatchMessage msg, Host from, short sProto, int channel) {
@@ -496,13 +496,11 @@ public class TPOChainFront extends FrontendProto {
             //这个意思是换通道了，不能进行响应了
             canSendToWriteTo=false;
             
-            
             //Close old writesTo
             if (!writesTo.getAddress().equals(self)) {
                 writesToConnected = false;
                 closeConnection(writesTo, peerChannel);
             }
-            
             
             //Update and open to new writesTo
             writesTo = new Host(notification.getWritesTo(), PEER_PORT);
