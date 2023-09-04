@@ -26,8 +26,8 @@ public class Membership {
 
     
     //后链和前链:挂载列表，后链节点是key，前链节点是value
-    private   Map<Host, Host> mountList;
-    // 标记前链节点是否有后链节点挂载，true为有后链挂载
+    private  Map<Host, Host> mountList;
+    //标记前链节点是否有后链节点挂载，true为有后链挂载
     private  Map<Host, Boolean> mountFlag;
     
     
@@ -56,7 +56,6 @@ public class Membership {
      *  返回节点的挂载节点
      */
     public  Host getMountNode(Host node){
-        
         if (frontChainContain(node)){
             return node;
         }
@@ -149,6 +148,11 @@ public class Membership {
         //logger.info("New " + this);
         checkSizeAgainstMaxFailures();
     }
+
+    // TODO: 2023/9/4   
+    
+    
+    
     
     
     /**
@@ -180,20 +184,9 @@ public class Membership {
     
     
     
-    /** 判断一个节点是否在集群里:被标记删除的节点不在链中
-     * */
-    public boolean isAlive(Host host) {
-        if(indexOf(host) >= 0){
-            if (pendingRemoval.contains(host)){
-                return false;
-            }else {
-                return true;
-            }
-        }else {//说明节点不存在
-            return  false;
-        }
-    }
     
+    
+
     
 
     
@@ -226,6 +219,9 @@ public class Membership {
         }
     }
 
+    
+    
+    
     
     /**
     返回前链的链尾是从leader作为链头开始的，那么leader的前一个节点就是前链链尾 
@@ -282,6 +278,12 @@ public class Membership {
     }
     
     
+    
+    
+    
+    
+    
+    
     //这两个函数在节点增删时使用
     /**
      * 在添加节点时用
@@ -294,11 +296,8 @@ public class Membership {
         indexMap.clear();
         frontIndexMap.clear();
         backIndexMap.clear();
-        /*
-        *  void add(int index, E element);则可以在插入操作过程中指定插入的位置，
-        * 此时，会自动将当前位置及只有的元素后移进行插入，需要注意的是，参数index的值不可大于当前list的容量，
-        * 即在使用此方法填充一个list时，必须以0开始依次填充
-        * */
+        
+        
         backChain.add(host);//节点添加都是后链末尾添加
         
         //让我知道什么时候加入了新节点
@@ -309,6 +308,11 @@ public class Membership {
         members.addAll(backChain);
         if (logger.isDebugEnabled())
             logger.debug("New " + this);
+
+        //实现挂载链表 
+        mountNode(host);
+        
+        
         checkFrontSizeAgainstQUORUM();
         checkSizeAgainstMaxFailures();
     }
@@ -356,7 +360,6 @@ public class Membership {
     public void addToPendingRemoval(Host affectedHost) {
         //不管是前链还是后链，都要将受影响节点加入 待移除列表中
         boolean add = pendingRemoval.add(affectedHost);
-        
         if (frontChainContain(affectedHost)){//如果当前节点在前链，移至后链
             int removePosition= frontIndexMap.get(affectedHost);
             Host  head=getBackChainHead();
@@ -368,30 +371,32 @@ public class Membership {
             }
             //用原后链链首替换要删除的元素 
             frontChain.set(removePosition, head);
-            
-            backChain.remove(head);//后链移除原链首
+            //后链移除原链首
+            backChain.remove(head);
             //将要删除节点添加到后链末尾
             backChain.add(affectedHost);
             
             
             //对挂载列表进行处理
-            if (mountFlag.get(affectedHost).equals(Boolean.TRUE)){//如果存在挂载节点，
+            if (mountFlag.get(affectedHost).equals(Boolean.TRUE)){//如果标记节点存在挂载的后链节点，
                 Host mountBackNode=null;//这是挂载的后链节点
                 for (Map.Entry<Host, Host> entry : mountList.entrySet()) {
                     if (entry.getValue().equals(affectedHost)) {
                         mountBackNode=entry.getKey();
                     }
                 }
+                //mountBackNode是挂载的后链节点
                 mountFlag.remove(affectedHost);
+                // 对head节点更新
                 mountList.put(mountBackNode,head);
                 mountFlag.put(head,Boolean.TRUE);
                 
+                // 对原后链尾节点所挂载的前链节点修改
                 mountFlag.put(mountList.get(head),Boolean.FALSE);
                 mountList.remove(head);
-            }else {// 不存在挂载的后链节点
+            }else {// 如果标记节点不存在挂载的后链节点
                 mountFlag.remove(affectedHost);
                 mountFlag.put(head,Boolean.FALSE);
-                
                 
                 mountFlag.put(mountList.get(head),Boolean.FALSE);
                 mountList.remove(head);
@@ -405,7 +410,7 @@ public class Membership {
             members.clear();
             members.addAll(frontChain);
             members.addAll(backChain);
-        }else {
+        }else {//标记节点在后链
             //删除原位置
             backChain.remove(affectedHost);
             //将待移除节点放入后链末尾
@@ -433,23 +438,10 @@ public class Membership {
     
     
     
-    /**
-     * 基本无用：只是保存 返回两个主机在链表中的距离:在leader的超时时钟中使用
-     * */
-    public int distanceFrom(Host current, Host initial) {
-        assert contains(current) && contains(initial);
-
-        int currentIndex = indexOf(current);
-        int initialIndex = indexOf(initial);
-        int dist = currentIndex - initialIndex;
-        if (dist < 0) dist += members.size();
-        return dist;
-    }
     
     
-    //有使用 ：在对消息进行群发时需要调用这个
-    //在tryTakeLeadership()中发送prepareMsg给其他节点
-    //在发送选举成功之后的可能返回断开的节点
+    
+    //有使用 ：在对消息进行群发时需要调用这个;在tryTakeLeadership()中发送prepareMsg给其他节点，在发送选举成功之后的可能返回断开的节点
     public List<Host> getMembers() {
         return Collections.unmodifiableList(members);
     }
@@ -458,6 +450,9 @@ public class Membership {
     public int size() {
         return members.size();
     }
+    
+    
+    
     
     // 返回前链
     public List<Host> getFrontChain(){
@@ -493,9 +488,8 @@ public class Membership {
     }
     
     
-    //新加入节点要复制对集群中的状态复制：成员列表
-    //这里不需要改变，因为调用这个方法的是刚加入节点向全体广播 joinsuccessMsg,用这个方法
-    //得到全体成员
+    
+    //新加入节点要复制对集群中的状态复制：成员列表；这里不需要改变，因为调用这个方法的是刚加入节点向全体广播 joinsuccessMsg,用这个方法
     public List<Host> shallowCopy() {
         List<Host>  temp= new ArrayList<>();
         temp.addAll(frontChain);
@@ -503,15 +497,8 @@ public class Membership {
         return temp;
     }
 
-    @Override
-    public String toString() {
-        return "{" +
-                "members=" + members +
-                '}';
-    }
 
-
-    // 将后链节点附加在对应的前链节点，是将后链Front层收到的消息发给前链节点来处理
+    // TODO: 2023/9/4 准备废弃，改为上面的 将后链节点附加在对应的前链节点，是将后链Front层收到的消息发给前链节点来处理
     public Host  appendFrontChainNode(Host self,Host leader){
         if (frontChainContain(self)){// 如果当前节点是前链的话，不需要附加
             return null;
@@ -523,12 +510,54 @@ public class Membership {
         int  offset=(frontIndexOf(leader)+backIndexOf(self)+1)% frontChain.size();
         return frontChain.get(offset);// 因为前链是F+1个节点，后链是F个节点。跳过leader
     }
+
+    
+
+
+    /**
+     * 基本无用：只是保存 返回两个主机在链表中的距离:在leader的超时时钟中使用
+     * */
+    public int distanceFrom(Host current, Host initial) {
+        assert contains(current) && contains(initial);
+
+        int currentIndex = indexOf(current);
+        int initialIndex = indexOf(initial);
+        int dist = currentIndex - initialIndex;
+        if (dist < 0) dist += members.size();
+        return dist;
+    }
+
+    @Override
+    public String toString() {
+        return "{" +
+                "members=" + members +
+                '}';
+    }
+    
+    
+    
+    
+    
     
     
     
     
     
 
+    /** 判断一个节点是否在集群里:被标记删除的节点不在链中
+     * */
+    public boolean isAlive(Host host) {
+        if(indexOf(host) >= 0){
+            if (pendingRemoval.contains(host)){
+                return false;
+            }else {
+                return true;
+            }
+        }else {//说明节点不存在
+            return  false;
+        }
+    }
+    
     public Host nodeAt(int pos){
         return members.get(pos);
     }

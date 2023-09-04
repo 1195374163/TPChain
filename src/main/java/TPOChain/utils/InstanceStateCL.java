@@ -14,7 +14,6 @@ public class InstanceStateCL {
     public final int iN;
     public SeqN highestAccept;
     public PaxosValue acceptedValue;
-    
     //ack的数量
     public short counter;
     private boolean decided;
@@ -65,8 +64,7 @@ public class InstanceStateCL {
     }
 
     
-    //TODO 这个forceAccept用在什么情况
-    //  在接收到其他节点的decideClMsg信息时，用到了这个
+    
     //If it is already decided by some node, or received from prepareOk
     /**
      * 更新SeqN和counter信息，准备重新发送
@@ -95,8 +93,6 @@ public class InstanceStateCL {
     }
 
     public void markDecided() {
-//        assert acceptedValue != null && highestAccept != null;
-//        assert !decided;
         decided = true;
     }
 }

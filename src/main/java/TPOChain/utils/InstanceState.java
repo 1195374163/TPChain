@@ -1,24 +1,19 @@
 package TPOChain.utils;
 
-import TPOChain.ipc.SubmitReadRequest;
-import common.values.PaxosValue;
-import pt.unl.fct.di.novasys.network.data.Host;
 
-import java.util.*;
+import common.values.PaxosValue;
+
 /**
  * 局部日志条目：instance的实例 
  * commandleader除了发送appbatch分发消息，还有NOOP消息对之前消息的ack信息，
  * */
 public class InstanceState  {
+    public final int iN;
     //要对SeqN进行改造，Seq的Node节点标记从哪个commandleader发来的
     public SeqN highestAccept;
-    public final int iN;
     public PaxosValue acceptedValue;
     public short counter;
     private boolean decided;
-    
-    //不需要,因为在SN中包含了当前实例使用的线程
-    //public  short  threadid;
     
     public InstanceState(int iN) {
         this.iN = iN;
@@ -39,9 +34,7 @@ public class InstanceState  {
                 '}';
     }
     
-
-
-    //TODO    forceAccept和accpt区别
+    
     //If it is already decided by some node, or received from prepareOk
     /**
      * 更新SeqN和counter信息，准备重新发送
