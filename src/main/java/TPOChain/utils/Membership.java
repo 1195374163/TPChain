@@ -25,46 +25,8 @@ public class Membership {
     private  final Map<Host, Integer> backIndexMap;
 
     
-    //后链和前链:挂载列表，后链节点是key，前链节点是value
-    private  Map<Host, Host> mountList;
-    //标记前链节点是否有后链节点挂载，true为有后链挂载
-    private  Map<Host, Boolean> mountFlag;
     
-    
-    // 这个函数不适应初始化，适应于对加入节点使用挂载算法：前链节点 ,这里的Host和Front的Host只差一个端口号，通知Front层是去除端口号
-    /**
-     * 新加入节点使用这个，将节点挂载在前链节点
-     * */
-    public void mountNode(Host node){
-        // 前链节点返回自身
-        if (frontChainContain(node)){
-            return ;
-        }
-        // 尽量少的变动
-        // 对系统中所有节点实现它的挂载，后链节点挂载之后一般不会再切换，以免两个通道都转发消息，造成顺序错位
-        // 解决方法是：遍历前链节点，找到第一个未挂载后链节点的前链节点
-        for (Host temp: frontChain) {
-            if (mountFlag.get(temp).equals(Boolean.FALSE)){// 说明这个前链节点还没有挂载
-                mountList.put(node,temp);
-                mountFlag.put(temp,Boolean.TRUE);
-                return;   
-            }
-        }
-    }
-
-    /**
-     *  返回节点的挂载节点
-     */
-    public  Host getMountNode(Host node){
-        if (frontChainContain(node)){
-            return node;
-        }
-        return mountList.get(node);
-    }
-    
-    
-    //对于要删除的节点，如果是后链，还保留着原来在list中的位置;
-    // 如果是前链移至后链链尾，并且将其纳入pendingRemoval集合在查询得到下一个节点要跳过这个节点
+    //对于要删除的节点，如果是后链，还保留着原来在list中的位置;如果是前链移至后链链尾，并且将其纳入pendingRemoval集合在查询得到下一个节点要跳过这个节点
     /**
      * 待处理的要删除的节点
      * */
@@ -112,8 +74,10 @@ public class Membership {
         checkSizeAgainstMaxFailures();
     }
     
-    // TODO: 2023/8/21   join节点使用：复制集群中节点及其状态，使用另外的构造函数
-    public Membership(List<Host> initial, int MIN_QUORUM_SIZE,Map<Host, Host> _mountList) {
+
+    //新加入节点的成员列表初始化：应该包含整体成员列表，待移除节点集合，挂载情况
+    public Membership(List<Host> initial, int MIN_QUORUM_SIZE,Map<Host, Host> _mountList,Map<Host, Boolean> _mountFlag){
+
         this.MIN_QUORUM_SIZE = MIN_QUORUM_SIZE;
         members = new ArrayList<>(initial);
 
@@ -126,16 +90,10 @@ public class Membership {
                 backChain.add(members.get(i));
             }
         }
+        mountList=new HashMap<>(_mountList);// 标记后链节点被挂载在哪个前链节点
         //标记前链节点是否被挂载.初始为false
-        mountFlag=new HashMap<>();
-        for (Host node:frontChain){
-            mountFlag.put(node,Boolean.FALSE);
-        }
-        mountList=new HashMap<>();// 标记后链节点被挂载在哪个前链节点
-        for (int i=0;i<backChain.size();i++){
-            mountList.put(backChain.get(i),frontChain.get(i));
-            mountFlag.put(frontChain.get(i),Boolean.TRUE);
-        }
+        mountFlag=new HashMap<>(_mountFlag);
+        
 
         indexMap = new HashMap<>();
         frontIndexMap = new HashMap<>();
@@ -148,8 +106,7 @@ public class Membership {
         //logger.info("New " + this);
         checkSizeAgainstMaxFailures();
     }
-
-    // TODO: 2023/9/4   
+    
     
     
     
@@ -181,19 +138,56 @@ public class Membership {
     public boolean  backChainContain(Host host){
         return backIndexOf(host) >= 0;
     }
+
+
+
     
     
-    
+
+    //后链和前链:挂载列表，后链节点是key，前链节点是value
+    private  Map<Host, Host> mountList;
+    //标记前链节点是否有后链节点挂载，true为有后链挂载
+    private  Map<Host, Boolean> mountFlag;
+
+
+    // 这个函数不适应初始化，适应于对加入节点使用挂载算法：前链节点 ,这里的Host和Front的Host只差一个端口号，通知Front层是去除端口号
+    /**
+     * 新加入节点使用这个，将节点挂载在前链节点
+     * */
+    public void mountNode(Host node){
+        // 前链节点返回自身
+        if (frontChainContain(node)){
+            return ;
+        }
+        // 尽量少的变动
+        // 对系统中所有节点实现它的挂载，后链节点挂载之后一般不会再切换，以免两个通道都转发消息，造成顺序错位
+        // 解决方法是：遍历前链节点，找到第一个未挂载后链节点的前链节点
+        for (Host temp: frontChain) {
+            if (mountFlag.get(temp).equals(Boolean.FALSE)){// 说明这个前链节点还没有挂载
+                mountList.put(node,temp);
+                mountFlag.put(temp,Boolean.TRUE);
+                return;
+            }
+        }
+    }
+
+    /**
+     *  返回节点的挂载节点
+     */
+    public  Host getMountNode(Host node){
+        // 如果是前链返回null，如果是后链，返回挂载的前链节点
+        if (frontChainContain(node)){
+            return null;
+        }
+        return mountList.get(node);
+    }
+
     
     
 
     
-
     
-    
-    // 检测集群当前存活的节点，
-    // 不需要；在链尾检测不满F+1个投票，系统会终止
-    // 这里真的可行吗？ 特别对于前链节点要有投票F+1
+    // 检测集群当前存活的节点，不需要；在链尾检测不满F+1个投票，系统会终止；这里真的可行吗？ 特别对于前链节点要有投票F+1
     // 是放过对删除节点的刨除还是不减少标记节点的，最后收集的投票数小于F+1，直接程序退出
     /**
      *确定当前节点数小于MIN_QUORUM_SIZE的系统最终节点数 则终止系统
@@ -281,10 +275,8 @@ public class Membership {
     
     
     
+    //-------------------这两个函数在节点增删时使用-----
     
-    
-    
-    //这两个函数在节点增删时使用
     /**
      * 在添加节点时用
      * */
@@ -441,6 +433,11 @@ public class Membership {
     
     
     
+    
+    
+    
+    //-------------------在全局发送消息时需要这个，比如发送Prepare消息，全局ack消息
+    
     //有使用 ：在对消息进行群发时需要调用这个;在tryTakeLeadership()中发送prepareMsg给其他节点，在发送选举成功之后的可能返回断开的节点
     public List<Host> getMembers() {
         return Collections.unmodifiableList(members);
@@ -453,6 +450,12 @@ public class Membership {
     
     
     
+    
+    
+    
+    
+    
+    //-----------------通知Data层的前后链---------------
     
     // 返回前链
     public List<Host> getFrontChain(){
@@ -489,6 +492,10 @@ public class Membership {
     
     
     
+    
+    
+    //--------------------新加入节点需要调用这个，安装节点的状态
+    
     //新加入节点要复制对集群中的状态复制：成员列表；这里不需要改变，因为调用这个方法的是刚加入节点向全体广播 joinsuccessMsg,用这个方法
     public List<Host> shallowCopy() {
         List<Host>  temp= new ArrayList<>();
@@ -498,21 +505,8 @@ public class Membership {
     }
 
 
-    // TODO: 2023/9/4 准备废弃，改为上面的 将后链节点附加在对应的前链节点，是将后链Front层收到的消息发给前链节点来处理
-    public Host  appendFrontChainNode(Host self,Host leader){
-        if (frontChainContain(self)){// 如果当前节点是前链的话，不需要附加
-            return null;
-        }
-        if (leader==null){//
-            return null;
-        }
-        // 将后链节点节点附加在leader后面节点的对应位置
-        int  offset=(frontIndexOf(leader)+backIndexOf(self)+1)% frontChain.size();
-        return frontChain.get(offset);// 因为前链是F+1个节点，后链是F个节点。跳过leader
-    }
-
     
-
+    
 
     /**
      * 基本无用：只是保存 返回两个主机在链表中的距离:在leader的超时时钟中使用
@@ -533,11 +527,22 @@ public class Membership {
                 "members=" + members +
                 '}';
     }
-    
-    
-    
-    
-    
+
+
+
+
+    // TODO: 2023/9/4 准备废弃，改为上面的 将后链节点附加在对应的前链节点，是将后链Front层收到的消息发给前链节点来处理
+    public Host  appendFrontChainNode(Host self,Host leader){
+        if (frontChainContain(self)){// 如果当前节点是前链的话，不需要附加
+            return null;
+        }
+        if (leader==null){//
+            return null;
+        }
+        // 将后链节点节点附加在leader后面节点的对应位置
+        int  offset=(frontIndexOf(leader)+backIndexOf(self)+1)% frontChain.size();
+        return frontChain.get(offset);// 因为前链是F+1个节点，后链是F个节点。跳过leader
+    }
     
     
     

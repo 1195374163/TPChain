@@ -32,6 +32,8 @@ public class RuntimeConfigure {
 
     
     
+    
+    
 
     //记录各个command leader进行命令的分发的序号，某个节点在故障恢复后，又成为新的前链节点，那前链节点使用这个，其他节点不使用用这个
     public int lastAcceptSent = -1;
@@ -43,20 +45,22 @@ public class RuntimeConfigure {
     //废弃
     public int highestDecidedInstance = -1;
     
-    // TODO: 2023/8/13 将ack和execute 设置两个访问锁 
     // 这个由Data控制
     public int highestAcknowledgedInstance = -1;
     
-    //这个由Leader进行赋值的，在新节点转发状态时需要记录这个
+    //这个由Leader进行赋值的，在新节点转发状态时需要记录这个，对于因状态，还要execute--->ack的实例，在新节点传输状态时从这个实例开始。
     public int highestExecutedInstance=-1;
 
+    
+    
+    
+    
+    
     // 旧的ack值的队列：在uponacceptMsg()中赋值，在gc线程中使用
     public BlockingQueue<Integer>  ackFlagQueue= new LinkedBlockingQueue<>();
     
     // 由控制协议的执行线程赋值，由各节点的Data 的GC线程使用，错过也不要紧，后续有新值同样顶替旧值的作用
     public BlockingQueue<Integer>  executeFlagQueue= new LinkedBlockingQueue<>();
-
-    
     
     //这个是Data通道的GC线程改变和上面的可能同时改变， GC标记不一定非要紧贴着 ack或execute，可以相差100个数
     public  int highestGCInstance=-1;
@@ -66,21 +70,23 @@ public class RuntimeConfigure {
     
     
     
+    
+    
 
     
     // 上一次发送accept消息的时间
     public long  lastSendAcceptTime=0;
+    
+    //  节点在接收到这个节点的分发消息的时间
+    public long  lastAcceptTime=0;
+
 
     /**
      * 链尾节点使用:主要后链链尾用来定时向消息的发送方或系统全局发送ack信息
      * */
     
-    //  节点在接收到这个节点的分发消息的时间
-    public long  lastAcceptTime=0;    
-    
-    //TODO: 2023/7/26 当取对应的前链节点一直不发送对应消息的Ack消息：可能由于前链节点故障，那么有末尾节点向全局发送ack消息
-    // 上次接收这个节点的ack消息的时间
-    public long  lastReceiveAckTime=0;
+    //TODO: 2023/7/26 当取对应的前链节点一直不发送对应消息的Ack消息：可能由于前链节点故障，那么有末尾节点向全局拿着最近的accept消息发送ack消息到全局节点
+    public long  lastReceiveAckTime=0;// 上次接收这个节点的ack消息的时间
     
     // 还有个当前时间System.currentTimeMillis()  这个与lastReceiveAckTime之差
 }

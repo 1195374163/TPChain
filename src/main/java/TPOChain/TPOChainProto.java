@@ -5,7 +5,6 @@ import TPOChain.ipc.SubmitReadRequest;
 import TPOChain.notifications.*;
 import TPOChain.utils.*;
 import common.values.*;
-import org.apache.commons.lang3.tuple.Triple;
 import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
 import TPOChain.ipc.ExecuteReadReply;
 import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
@@ -18,7 +17,6 @@ import pt.unl.fct.di.novasys.channel.tcp.TCPChannel;
 import pt.unl.fct.di.novasys.channel.tcp.events.*;
 import frontend.ipc.DeliverSnapshotReply;
 import frontend.ipc.GetSnapshotRequest;
-import frontend.ipc.SubmitBatchRequest;
 import frontend.notifications.*;
 import io.netty.channel.EventLoopGroup;
 import pt.unl.fct.di.novasys.network.data.Host;
@@ -35,23 +33,23 @@ import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedInstances{
     private static final Logger logger = LogManager.getLogger(TPOChainProto.class);
-
+    
+    // 在bable框架中标识
     public final static short PROTOCOL_ID = 200;
     public final static String PROTOCOL_NAME = "TPOChainProto";
 
-    
+    // 网络层的标识
     public static final String ADDRESS_KEY = "consensus_address";
     public static final String PORT_KEY = "consensus_port";
 
     
     
     public static final String LEADER_TIMEOUT_KEY = "leader_timeout";
-  
+    
     public static final String RECONNECT_TIME_KEY = "reconnect_time";
     public static final String NOOP_INTERVAL_KEY = "noop_interval";
     public static final String JOIN_TIMEOUT_KEY = "join_timeout";
@@ -59,23 +57,11 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     
     
     
-    public static final String INITIAL_STATE_KEY = "initial_state";
     
     public static final String INITIAL_MEMBERSHIP_KEY = "initial_membership";
-    
+    public static final String INITIAL_STATE_KEY = "initial_state";
     public static final String QUORUM_SIZE_KEY = "quorum_size";
 
-    
-    /**
-     * 各项超时设置
-     */
-    private final int LEADER_TIMEOUT;
-    private final int NOOP_SEND_INTERVAL;
-    private final int QUORUM_SIZE;
-    private final int RECONNECT_TIME;
-    private final int JOIN_TIMEOUT;
-    private final int STATE_TRANSFER_TIMEOUT;
-    
     
     
     //注意对各项超时之间的依赖关系：noOp_sended_timeout  leader_timeout  reconnect_timeout 关系到时钟线程几组的设置，添加顺序有关
@@ -87,6 +73,16 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      * state_transfer_timeout=5000
      * reconnect_time=1000
      * */
+    private final int LEADER_TIMEOUT;
+    private final int NOOP_SEND_INTERVAL;
+    private final int RECONNECT_TIME;
+    private final int JOIN_TIMEOUT;
+    private final int STATE_TRANSFER_TIMEOUT;
+
+    // 大多数的标识
+    private final int QUORUM_SIZE;
+    
+    
 
     
 
@@ -96,6 +92,13 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     public enum State {JOINING, WAITING_STATE_TRANSFER, ACTIVE}
     private TPOChainProto.State state;
 
+
+
+    /**
+     *根据初始的节点参数生成的固定的主机链表,是从配置中读取的
+     * */
+    private final LinkedList<Host> seeds;
+    
     /**
      * 这是对系统全体成员的映射包含状态的成员列表(即物理链)，随时可以更新
      * */
@@ -107,32 +110,40 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     private final Set<Host> establishedConnections = new HashSet<>();
     
     
+    
+    
     /**
      * 代表着leader，SeqN是一个term,由<int,host>组成，而currentSN前面的Int，是term刚开始的实例号
      * */
     private Map.Entry<Integer, SeqN> currentSN;
+
+
+    
     
     /**
-     * 代表自身，左右相邻主机
+     * 控制链：主要是重新配前链，根据选定的Leader，从Membership生成以Leader为首节点的前链节点之后，之后依次接入后链节点
+     */
+    private List<Host> members=new ArrayList<>();
+    
+    /**
+     * 代表自身节点
      * */
     private final Host self;
-    
-    //控制链：主要是重新配前链，根据选定的Leader，从Membership生成以Leader为首节点的前链节点之后，之后依次接入后链节点
-    private List<Host> members=new ArrayList<>();
-    // nextOKFront和nextOkBack是静态的，，而nextOk是Leader选定之后，nextOK从nextOKFront和NextOkBack中选定一个
-    private Host Head=null;//使用
-    private Host nextOK;
+    private Host head ;//应该是Leader节点
+    private Host nextOk;
     //标记nextOk节点是否连接  
-    private boolean  nextOkConnnected=false;
+    private boolean  nextOkConnnected;
 
+    
+    
+    
     
 
     /**
      * Leader节点使用 是否为leader,职能排序
      * */
     private boolean amQuorumLeader;
-    // TODO: 2023/8/1  amQuorumLeader 会和support Leader不一致吗？
-    //  可能会，因为接收到更高序好的prepare之后， 
+
     /**
      * leader使用，隔断时间发送no-op命令
      * */
@@ -145,7 +156,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
 
     // 还有一个field ： System.currentTimeMillis(); 隐含了系统的当前时间
 
-
+    
 
     /**
      *计时 非leader前链节点计算与leader之间的呼吸
@@ -181,6 +192,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     
     
     
+    
+    
 
     /**
      * 加入节点时需要的一些配置
@@ -212,20 +225,16 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     // TODO: 2023/7/21 新加入节点的，消息队列的设置因为新加入节点要接受两部分消息：一个是和状态配套的日志消息 一个是加入之后新局部日志和全局日志信息来的  
     
     
-    /**
-     * 暂存一些系统的节点状态，好让新加入节点装载
-     * */
+
      //Dynamic membership
     //TODO eventually forget stored states... (irrelevant for experiments)
     //Waiting for application to generate snapshot (boolean represents if we should send as soon as ready)
     private final Map<Host, MutablePair<Integer, Boolean>> pendingSnapshots = new HashMap<>();
-    // 暂存各节点的配置包括：自己
-    private   Map<Host,RuntimeConfigure> pendingRuntimeConfigure=new HashMap<>();
     
-    //---------------------新加入节点方的数据结构------------------------------
-    //Application-generated snapshots
-    // java中的三元组 Triple<Integer, String, Boolean> triplet;
+    // java中的三元组 Triple<Integer, String, Boolean> triplet; Application-generated snapshots
     private final Map<Host, Pair<Integer, byte[]>> storedSnapshots = new HashMap<>();
+    
+    
     
     //给我这个节点发送 joinSuccess消息的节点  List of JoinSuccess (nodes who generated snapshots for me)
     private final Queue<Host> hostsWithSnapshot = new LinkedList<>();
@@ -235,7 +244,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      *暂存节点处于joining，暂存从前驱节点过来的批处理信息，等待状态变为active，再进行处理
      */
     private final Queue<SortValue> bufferedOps = new LinkedList<>();
-
+    
     // TODO: 2023/7/21 加入的状态应该包含它这个状态执行到全局序列哪的序号，后续根据这个指标进行执行
     // TODO: 2023/7/21 加入之后关于执行线程和回收线程所需要的几个值的通道也需要初始化  
     private Map.Entry<Integer, byte[]> receivedState = null;
@@ -243,11 +252,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     //  可以添加一个map集合，或Pair 显示状态和消息的组合，当两者齐全之后进行状态的装载和消息的填充
     //   也添加消息的的缓存
     
-    
-    // TODO: 2023/7/21 关于日志状态的遗忘，因为时间，先不做，后续在优化，因为节点故障也不多浪费的存储也不多
-    private  List<Host>  canForgetSoredStateTarget;
-    
-
 
     
     
@@ -266,23 +270,12 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      * */
     private final EventLoopGroup workerGroup;
 
-    /**
-     *根据初始的节点参数生成的固定的主机链表
-     * */
-    private final LinkedList<Host> seeds;
+
 
     
     
     
-    //--------------物理链；传递给下层Data层的成员指标，代表Data端的主机映射，不包括标记节点
     
-    private  List<InetAddress>  frontChain=new ArrayList<>();
-    private  List<InetAddress>  backChain =new ArrayList<>();
-
-    //  Front层的挂载节点，前链节点是自身，后链节点是扫描从前链节点扫描第一个未挂载其他后链节点的前链节点
-    //  还有一个是当角色改变， 挂载节点
-    private   InetAddress   mountNode;
-
     
     
     /**
@@ -308,16 +301,30 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     //leader使用，即使发生leader交换时，由新leader接棒：由新leader根据所有节点的accept信息来推断出lastAcceptSent
     private int lastAcceptSentCl = -1;
 
+
+
+
+    
+    
+    
     
 
-    // 加入一个执行锁:为什么加入这个，因为添加状态需要读取状态，而执行线程需要更新状态，两者冲突
-    // 做法：将锁放入最小的执行单元，因为执行线程可能等待消息队列而阻塞整个线程，锁一直释放不了，将锁放入最小的单元，避免
+    //--------------物理链；传递给下层Data层的成员指标，代表Data端的主机映射，不包括标记删除节点
+    private  List<InetAddress>  frontChain=new ArrayList<>();
+    private  List<InetAddress>  backChain =new ArrayList<>();
+
+    //  Front层的挂载节点，前链节点是自身，后链节点是扫描从前链节点扫描第一个未挂载其他后链节点的前链节点
+    private   InetAddress   mountNode; // 这里是ip地址，是不包含端口号的
+    // 前链节点使用哪个通道
+    private    int     dataChannelIndex;
+
+
+
+    
+    // TODO: 2023/9/5   除了锁住执行之后，得到从execute->ack的各通道节点历史操作记录
     private final Object  executeLock=new Object();
-    
-    
-    
-    //执行实例守护线程
-    private Thread executionSortThread;
+    // TODO: 2023/9/10   当加入节点要求状态转移时终止线程，结束之后再重新开启线程
+    private Thread executionSortThread;//-----execute
     // decide的值的变化，避开对一个值的加锁
     private BlockingQueue<Integer> olddecidequeue= new LinkedBlockingQueue<>();
     //全局实例的队列
@@ -326,10 +333,16 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     
     
     
-    //GC 
-    private Thread executionGabageCollectionThread;
+    
+ 
+    private Thread executionGabageCollectionThread;//---------GC 
     private BlockingQueue<Integer> olddackqueue= new LinkedBlockingQueue<>();
     private BlockingQueue<Integer> olddexecutequeue= new LinkedBlockingQueue<>();
+    
+    
+    
+    
+    
     
     //Leader宕机也需要向Data层发送通知， 或者不需要，因为Data层连接Leader的通道已经断开，不需要外部响应(除非Leader没宕机，只是被删除) 
     
@@ -350,14 +363,9 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         
         self = new Host(InetAddress.getByName(props.getProperty(ADDRESS_KEY)),
                 Integer.parseInt(props.getProperty(PORT_KEY)));
-        nextOK=null;
+        nextOk =null;
         nextOkConnnected=false;
-        
-
-        //不管是排序还是分发消息：标记下一个节点
-        //nextOkFront =null;
-        //nextOkBack=null;
-        
+        head=null;
         
         
         this.QUORUM_SIZE = Integer.parseInt(props.getProperty(QUORUM_SIZE_KEY));
@@ -478,13 +486,10 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         registerReplyHandler(DeliverSnapshotReply.REPLY_ID, this::onDeliverSnapshot);
 
         
-        // 向Data层通知当前节点的状态
-        triggerStateChange();
-
-
+        
         //在这里只是声明初始化执行和回收线程
-        this.executionSortThread = new Thread(this::execLoop,  "---execute" );
-        this.executionGabageCollectionThread=new Thread(this::gcLoop,"---gc");
+        this.executionSortThread = new Thread(this::execLoop,  "---ExecuteThread" );
+        this.executionGabageCollectionThread=new Thread(this::gcLoop,"---GcThread");
         
         
         //根据初始设置：新加入节点是激活的还是等待加入的
@@ -499,6 +504,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             joinTimer = setupTimer(JoinTimer.instance, 1000);
             // TODO: 2023/8/3 记得在加入成功之后进行开启执行线程和回收线程 
         }
+        // 向所有的Data层通知当前节点的状态，因为当前状态是Active才会向next节点转发，是join或 ，不能向next节点转发
+        triggerStateChange();
         logger.info("TPOChainProto: " + membership + " qs " + QUORUM_SIZE);
     }
     
@@ -507,21 +514,21 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     
     
     
-    // --------------------------触发Leader选举
+    // --------------------------触发Leader选举-------------------
     
     /**
      * 初始状态为Active开始启动节点
      * */
     private void setupInitialState(List<Host> members, int instanceNumber) {
-        //传进来的参数setupInitialState(seeds, -1);
         //这里根据传进来的顺序， 已经将前链节点和后链节点分清楚出了
         membership = new Membership(members, QUORUM_SIZE);
-
         
         //next:因为需要全连接作为成员管控，发送prepare  prepareok   electionok消息
         members.stream().filter(h -> !h.equals(self)).forEach(this::openConnection);
-        joiningInstanceCl = highestGarbageCollectionCl=highestAcceptedInstanceCl = highestExecuteInstanceCl =highestAcknowledgedInstanceCl = highestDecidedInstanceCl =
-                instanceNumber;// instanceNumber初始为-1,但对于
+        joiningInstanceCl       = highestGarbageCollectionCl   = 
+        highestExecuteInstanceCl=highestAcceptedInstanceCl     =
+        highestDecidedInstanceCl=highestAcknowledgedInstanceCl =
+        instanceNumber;// instanceNumber初始为-1,但对于
         
         //对命令分发进行初始化配置
         for (Host tempHost:members) {
@@ -544,12 +551,15 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                 hostMessageQueue.put(temp,que);
             }
         }
-        //主要是分发的相关配置完成，通知Data层初始化完成
+        //主要是分发的相关配置完成，通知Data层初始化完成，因为Data使用配置和分发实例
         triggerInitializeCompletedNotification();
-
+        
         // 将更新物理前链和后链节点，并将链通知传递到Data层
         changeDataFrontAndBackChain();
-       
+        // 将物理链的前后链挂载通知Front层 
+        triggerMembershipChangeNotification();
+        
+        
         //当判断当前节点是否为前链节点，是的话，执行
         if(membership.frontChainContain(self)){
             if (logger.isDebugEnabled()){
@@ -558,7 +568,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             frontChainNodeAction();
         }
         
-        //开启执行和回收线程
+        //开启 执行和回收线程 的运行
         this.executionSortThread.start();
         this.executionGabageCollectionThread.start();
     }
@@ -594,9 +604,9 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //拥有了设置选举leader的资格，设置领导超时处理
         leaderTimeoutTimer = setupPeriodicTimer(LeaderTimer.instance, LEADER_TIMEOUT, LEADER_TIMEOUT / 3);
         lastLeaderOp = System.currentTimeMillis();
-        
     }
     
+    // -------  下面是经过了一段时间
     
     /**  抑制一些候选举leader的情况：只有在与leader相距(F+1)/2 +1
     * 有问题：在leader故障时，leader与后链首节点交换了位置
@@ -607,6 +617,10 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      * 在leadertimer超时争取当leader
      */
     private void onLeaderTimer(LeaderTimer timer, long timerId) {
+        if(!membership.frontChainContain(self)){
+            cancelTimer(leaderTimeoutTimer);
+            return;
+        }
         // 在进入超时,说明失去leader之间的联系
         if (!amQuorumLeader && (System.currentTimeMillis() - lastLeaderOp > LEADER_TIMEOUT) &&
                 (supportedLeader() == null //初始为空 ，或新加入节点
@@ -627,7 +641,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     private void tryTakeLeadership() { //Take leadership, send prepare
         logger.info("Attempting to take leadership...");
         
-
         //为什么是ack信息，保证日志的连续
         //InstanceStateCL instance = globalinstances.computeIfAbsent(highestAcknowledgedInstanceCl + 1, InstanceStateCL::new);
         InstanceStateCL instance;
@@ -641,7 +654,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //private Map.Entry<Integer, SeqN> currentSN是
         //currentSN初始值是new AbstractMap.SimpleEntry<>(-1, new SeqN(-1, null));
         SeqN newSeqN = new SeqN(currentSN.getValue().getCounter() + 1, self);
-        //生成对应序号的prepareok的Map
+        //生成对应序号的prepareok的Map，是响应信息的接收处
         instance.prepareResponses.put(newSeqN, new HashSet<>());
         
         
@@ -681,7 +694,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                 }
                 sendOrEnqueue(new PrepareOkMsg(msg.iN, msg.sN, values), from);
                 lastLeaderOp = System.currentTimeMillis();// 这个是必须的，防止再竞争Leader
-                //
             } else//当msg的SN小于等于当前leader标记，丢弃
                 logger.warn("Discarding prepare since sN <= hP");
         } else { //Respond with decided message  主要对于系统中信息滞后的节点进行更新
@@ -697,6 +709,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         }
     }
 
+    
     // 这个调用处有发放大的prepare消息处
     /**
      *  logger.info("New highest instance leader: iN:" + iN + ", " + sN);
@@ -705,20 +718,22 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         assert iN >= currentSN.getKey();
         assert sN.greaterThan(currentSN.getValue());
         assert iN >= currentSN.getKey();
-
-        currentSN = new AbstractMap.SimpleEntry<>(iN, sN);
-        logger.info("New highest instance leader: iN:" + iN + ", " + sN);
-
-        //若为领导则退出领导
-        if (amQuorumLeader && !sN.getNode().equals(self)) {
-            amQuorumLeader = false;
-            cancelTimer(noOpTimerCL);
-            // 清空队列
-            waitingAppOps.clear();
-            waitingMembershipOps.clear();
+        
+        
+        // 当sN大于当前的参数，执行更新
+        if (sN.greaterThan(currentSN.getValue())){
+            currentSN = new AbstractMap.SimpleEntry<>(iN, sN);
+            logger.info("New highest instance leader: iN:" + iN + ", " + sN);
+            //若为领导则退出领导
+            if (amQuorumLeader && !sN.getNode().equals(self)) {
+                amQuorumLeader = false;
+                // 结束noop发送时钟
+                cancelTimer(noOpTimerCL);
+                // 清空队列
+                waitingAppOps.clear();
+                waitingMembershipOps.clear();
+            }
         }
-        //不为leader的就更新个leader的标志SN
-        changeLogicChain();
     }
     
     
@@ -730,7 +745,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         if (logger.isDebugEnabled()){
             logger.debug(msg + " from:" + from);
         }
-       
         
         InstanceStateCL instance = globalinstances.get(msg.iN);
         //在实例被垃圾收集  或    msg的实例小于此节点的Decide   或    现在的leader大于msg的leader
@@ -744,7 +758,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //这个说明此节点在系统中属于落后状态，之前的选举leader先废弃
         instance.prepareResponses.remove(msg.sN);
         
-        
         //Update decided values
         for (AcceptedValueCL decidedValue : msg.decidedValues) {
             InstanceStateCL decidedInst = globalinstances.computeIfAbsent(decidedValue.instance, InstanceStateCL::new);
@@ -757,8 +770,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             //Make sure there are no gaps between instances
             assert instance.iN <= highestAcceptedInstanceCl + 1;
             if (instance.iN > highestAcceptedInstanceCl) {
-                highestAcceptedInstanceCl++;
-                assert instance.iN == highestAcceptedInstanceCl;
+                highestAcceptedInstanceCl=instance.iN ;
             }
             if (!decidedInst.isDecided())
                 decideAndExecuteCL(decidedInst);
@@ -817,7 +829,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                 if (acceptedInstance.iN > highestAcceptedInstanceCl) {
                     //highestAcceptedInstanceCl++;// 原来是这个
                     highestAcceptedInstanceCl=acceptedInstance.iN;
-                    assert acceptedInstance.iN == highestAcceptedInstanceCl;
                 }
             }else {//不需要管
                 //到达这里 表明这个节点已经有了对应的实例，且那个实例的leader term大于
@@ -858,8 +869,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //新leader会发送noop消息，激活前链节点的转发消息
         logger.info("I am leader now! @ instance " + instanceNumber);
         
-        // Leader需要这个调整逻辑控制链
-        changeLogicChain();
         
         /**
          * 传递已经接收到accpted消息    Propagate received accepted ops
@@ -910,8 +919,9 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                 sendNextAcceptCL(nextOp);
             } 
         }
-        
-        //处理在候选阶段的信息
+
+        // FIXME: 2023/9/10  因为排序使用批处理，这里应该使用批处理发送 
+        //处理在候选阶段的信息, 是批处理吗？
         /**
         * 发送暂存的的排序消息
         * */
@@ -927,21 +937,21 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      * 在成功选举后，发送选举成功消息
      */
     private  void uponElectionSuccessMsg(ElectionSuccessMsg msg, Host from, short sourceProto, int channel) {
-        if (logger.isDebugEnabled()){
-            logger.debug("收到选举成功消息"+msg + " from:" + from);
+        if (logger.isDebugEnabled()) {
+            logger.debug("收到选举成功消息" + msg + " from:" + from);
         }
+        // 如果sN 小于 当前值，直接返回
+        if (msg.sN.lesserThan(currentSN.getValue())) {
+            return;
+        }
+
         setNewInstanceLeader(msg.iN, msg.sN);
         // 在候选阶段，不会通知Data新Leader，只有成功当选之后再通知Data层，所以不会再候选者阶段收到排序请求 
-
-        // 向Data层传输新Leader
-        triggerLeaderChange();
         //因为Leader已经选举出来，从物理链中可以生成逻辑控制链， 
         changeLogicChain();
-        // TODO: 2023/8/2 应该这里改变，应该在Leader选举成功消息调用，当然这里也可以调用 
-        // 改变节点的挂载，将后链节点挂载在前链除了leader节点的前链节点
-        triggerMembershipChangeNotification();
-    }
-    
+        // 向Data层传输新Leader
+        triggerLeaderChange();
+    }    
     
     /**
      * 处理leader和其他节点呼吸事件
@@ -962,47 +972,45 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         }
     }
 
+    
     // TODO: 2023/8/3 什么时候会出现候选者：因为prepare发过来就相等于候选者，达到多数才属于Leader,
     //  那接收prepare的节点只是以为是Leader，其实只是候选者，只有在拿到选举成功消息，才能说明绑定的是Leader
-    
     // TODO: 2023/8/2 在Leader更新成功调用，缺少调用： 在节点被删除  被添加处使用
     /**
-     * 每当Leader发生变化或删除或添加节点时调用这个
+     * 每当Leader发生变化或删除或添加节点时调用这个,对逻辑控制链进行修改
      */
     private  void changeLogicChain(){
-        Host leader=supportedLeader();
-        int indexleader=membership.frontIndexOf(leader);
-
+        //清空以前的内容  members 是控制链，
+        members.clear();
+        //拿到前链
         List<Host> fronttemp=membership.getFrontChain();
-        for (int i=0;i<frontChain.size();i++){
-            int index=(indexleader+i)%frontChain.size();
-            members.add(fronttemp.get(index));
+        head=supportedLeader();
+        int indexleader=fronttemp.indexOf(head);
+        int size=fronttemp.size();
+        for (int i=0;i<fronttemp.size();i++){
+            members.add(fronttemp.get((indexleader+i)%size));
         }
-        Head=members.get(0);
+        
         // 这个是不包含标记删除节点的后链
         List<Host> backtemp=membership.getBackChain();
         members.addAll(backtemp);
-
-
+        
+        
         //--------------重新生成逻辑链之后要改变nextok的连接
         int indexself=members.indexOf(self);
         Host newnextok=members.get((indexself+1)%members.size());
-        if (nextOK == null || !nextOK.equals(newnextok)) {
-            // 因为control层本身是全连接，不能关闭也不能开启(因为本身是开启)，nextok节点
-            //当满足这个条件，
-            if (nextOK != null && !nextOK.getAddress().equals(self.getAddress())) {
-                nextOkConnnected = false;
-            }
-            //Update and open to new writesTo
-            nextOK =newnextok;
-            logger.info("New nextok connected: " + nextOK.getAddress());
-
-            // 因为是全连接，当nextok更换时不会调用uponoutConnnectionup()即自动转发ack->accept的消息，需要手动进行转发ack
-            if (state==State.JOINING){
-                return;
-            }// 转发所有ack->accept的全局排序日志到nextok节点 
-            for (int i = highestAcknowledgedInstanceCl + 1; i <= highestAcceptedInstanceCl; i++) {
-                forwardCL(globalinstances.get(i));
+        if (nextOk == null || !nextOk.equals(newnextok)) {
+            nextOk =newnextok;
+            logger.info("New nextok connected: " + nextOk.getAddress());
+            // 那么默认包含了有nextok有了新值，因为外函数进行判别，那么需要转发ack+1->accept的消息
+            if (nextOk != null) { 
+                if (state==State.JOINING){
+                    return;
+                }
+                // 转发所有ack->accept的全局排序日志到nextok节点 
+                for (int i = highestAcknowledgedInstanceCl + 1; i <= highestAcceptedInstanceCl; i++) {
+                    forwardCL(globalinstances.get(i));
+                }
             }
         }
     }
@@ -1016,22 +1024,23 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     //--------------------Notification ----通知Front和Data层
 
     /**
-     * 生成局部配置信息和局部日志表和日志队列 
+     * 生成局部配置信息和局部日志表和日志队列，通知Data使用 
      * */
     private void   triggerInitializeCompletedNotification(){
         triggerNotification(new InitializeCompletedNotification());
     }
-
-    // TODO: 2023/8/4 以下这条通知，应该在哪里调用，是Prepare setNewLeader  还是  ElectionSuccess 
+    
+    
     /**
      * 向front层发送成员改变通知
      * */
     private void triggerMembershipChangeNotification() {
         //可以设置固定的后链与对应的前链节点挂载，还是在Leader选举之后新的后链重新挂载前链的非Leader节点 
-        // 理论上还是动态挂载更好
+        // 理论上还是动态挂载更好,还是物理链挂载
         
         //这个方法的调用处，已经说明supportleader肯定不为null
-        Host  host=membership.appendFrontChainNode(self,supportedLeader());
+        //Host  host=membership.appendFrontChainNode(self,supportedLeader());
+        Host host=membership.getMountNode(self);
         //触发前链时附加一个多少前链标记 
         if(host!=null){// 说明是后链节点，有附加的前链节点
             triggerNotification(new MembershipChange(
@@ -1066,8 +1075,17 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     private  void  triggerLeaderChange(){
         triggerNotification(new LeaderNotification(supportedLeader()));
     }
+    
+    
+    // TODO: 2023/9/10 因为leader的Data端还保存着连接，Data依旧转发排序请求 
+    /**
+     * 通知Data层leader宕机
+     * */
+    private void   triggerLeaderCrash(){
+        
+    }
 
-
+    
     // FIXME: 2023/8/3 除了初始配置，应该在状态更新之后调用调用处写清，为什么需要这个，因为再状态是Join,是不能
     /**
      *  data层和control层状态一致，特别在outConnectionUp()中根据这个状态，判断是否转发消息 
@@ -1112,8 +1130,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      * 只有自己为leader时,自己的data端调用这个
      */
     public void onSubmitOrderMsg(SubmitOrderMsg not, short from){
-        OrderMSg msg=not.getOrdermsg();
-        generateSortValue(msg);
+        generateSortValue(not.getOrdermsg());
         return;
         //if (amQuorumLeader){//只有leader才能处理这个排序请求
         //    sendNextAcceptCL(new SortValue(msg.node,msg.iN));
@@ -1133,7 +1150,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     
     // 将排序使用批处理使用 10个批处理
     public void  generateSortValue(OrderMSg msg){
-        
         Host node=msg.node;
         InetAddress targetInetAddress=msg.node.getAddress();
         int iN =msg.iN;
@@ -1150,10 +1166,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             if (amQuorumLeader){//只有leader才能处理这个排序请求
                 sendNextAcceptCL(new SortValue(sortitembuffer));
             } else if (supportedLeader().equals(self)){// 当为候选者
-                // 将排序请求缓存 
-                if (logger.isDebugEnabled()){
-                    logger.debug("暂存从自己Data端过来的消息");
-                }
+                // 将排序请求缓存
+                logger.warn("暂存从自己Data端过来的消息");
                 waitingAppOps.add(new SortValue(sortitembuffer));
             } else {//对消息进行转发,转发到leader
                 sendOrEnqueue(msg,supportedLeader());
@@ -1174,7 +1188,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         // TODO: 2023/7/27 在control端可以判定这个之前的实例是不是发送排序了，没有则生成之前和这次的实例 
         //  若这个实例长时间不存在则空过这个的执行
         
-        
         InstanceStateCL instance;
         if (!globalinstances.containsKey(lastAcceptSentCl + 1)) {
             instance=new InstanceStateCL(lastAcceptSentCl + 1);
@@ -1189,7 +1202,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         if (val.type== PaxosValue.Type.SORT){
             nextValue =val;
         }else if ( val.type== PaxosValue.Type.NO_OP){
-            //nextValue = new NoOpValue();
             nextValue=val;
         } else if (val.type == PaxosValue.Type.MEMBERSHIP) {
             MembershipOp next = (MembershipOp) val;
@@ -1222,7 +1234,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     }
     
     
-    // 上面那三个方法是Leader节点使用，下面的是
+    // 上面那三个方法是Leader节点使用，下面的是--------------
     private void uponAcceptCLMsg(AcceptCLMsg msg, Host from, short sourceProto, int channel) {
         //-------无效信息：对不在系统中的节点发送未定义消息让其重新加入系统
         if(!membership.contains(from)){
@@ -1265,13 +1277,12 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         
         // TODO: 2023/6/26 因为leader选举成功会向所有节点发送选举成功消息，所以这个不需要了 
         //设置msg.sN.getNode()为新支持的leader
-        //if (msg.sN.greaterThan(currentSN.getValue())){
-        //    setNewInstanceLeader(msg.iN, msg.sN);
-        //}
+        if (msg.sN.greaterThan(currentSN.getValue())){
+            setNewInstanceLeader(msg.iN, msg.sN);
+        }
         
-
         //在这里可能取消了删除节点，后续真的删除节点时也在后面的mark中重新加入节点
-        maybeCancelPendingRemoval(instance.acceptedValue);
+        //maybeCancelPendingRemoval(instance.acceptedValue);
         instance.accept(msg.sN, msg.value, (short) (msg.nodeCounter + 1));//进行对实例的投票确定
         
         
@@ -1313,6 +1324,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //这里封装了实现细节：实际改变了物理链：那么需要重新调整 逻辑控制链和数据通道链；Leader宕机是不会走这个流程，那么只有两种情况
         membership.addToPendingRemoval(op.affectedHost);
 
+        // TODO: 2023/9/10  改变逻辑链 
+        changeLogicChain();
         // TODO: 2023/8/23  没有重新赋值nextok节点吗 
         // FIXME: 2023/8/25  重发一些，ack+1到accept的消息
         //members.
@@ -1320,8 +1333,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         
         //通知应该改变Front层，
         triggerMembershipChangeNotification();
-        // TODO: 2023/8/3 因为后链节点的Front挂载在对应前链节点，当 
-        
+        // TODO: 2023/8/3 因为后链节点的Front挂载在对应前链节点，当
         //通知改变Data层，这个是更新FrontChain和BackChain，之后通知Data层
         changeDataFrontAndBackChain();
     }
@@ -1333,7 +1345,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     // 链只是传导排序信息，最后ack发给Leader，是新Leader还是
     private void forwardCL(InstanceStateCL inst) {
         // 转发消息应该循环完整条链  
-        if (nextOK.equals(Head)){//使用逻辑链，表明已经传输到链尾
+        if (nextOk.equals(head)){//使用逻辑链，表明已经传输到链尾
             // 发送ack前判断是否满足大多数的含义
             if (inst.counter < QUORUM_SIZE) {
                 logger.error("Last living in chain cannot decide. Are f+1 nodes dead/inRemoval? "
@@ -1345,7 +1357,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         }else {//发送accept信息
             AcceptCLMsg msg = new AcceptCLMsg(inst.iN, inst.highestAccept, inst.counter, inst.acceptedValue,
                     highestAcknowledgedInstanceCl);
-            sendMessage(msg, nextOK);
+            sendMessage(msg, nextOk);
         }
     }
     
@@ -1358,7 +1370,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //    logger.debug("Decided: " + instance.iN + " - " + instance.acceptedValue);
         if (instance.acceptedValue.type == PaxosValue.Type.SORT) {
             if (state == TPOChainProto.State.ACTIVE){
-                // 不做执行
+                // 不做执行 依靠执行线程执行
             } else  //在节点处于加入join之后，暂存存放的批处理命令
                 // TODO: 2023/6/1 这里不对，在加入节点时，不能执行这个 
                 bufferedOps.add((SortValue) instance.acceptedValue);
@@ -1368,7 +1380,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             //nothing  
         }
         instance.markDecided();
-        highestDecidedInstanceCl++;
+        //highestDecidedInstanceCl++;// 改成直接赋值
+        highestDecidedInstanceCl=instance.iN;
         //放入旧的decide值，供执行单位使用
         olddecidequeue.add(highestDecidedInstanceCl);
     }
@@ -1444,8 +1457,9 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             //assert highestDecidedInstanceCl == i;
         }
         
-        // 进行ack信息的更新，使用++ 还是直接赋值好 
-        highestAcknowledgedInstanceCl++;
+        // 进行ack信息的更新，使用++ 还是直接赋值好 ,使用直接赋值更好
+        //highestAcknowledgedInstanceCl++;
+        highestAcknowledgedInstanceCl=instanceN;
         if (highestAcknowledgedInstanceCl % 200 == 0) {
             olddackqueue.add(highestAcknowledgedInstanceCl);
         }
@@ -1481,6 +1495,9 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //    lastAcceptTimeCl = 0; //Force sending a NO-OP (with the ack)
     }
 
+    
+    
+    
     // TODO: 2023/8/4 如果消息队列中没有，再从日志中获取日志
     //TODO 一个命令可以回复客户端，只有在它以及它之前所有实例被ack时，才能回复客户端
     // 这是分布式系统的要求，因为原程序已经隐含了这个条件，通过判断出队列结构，FIFO，保证一个batch执行了，那么
@@ -1503,12 +1520,14 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             for (int i=highestExecuteInstanceCl+1;i<=olddecide;i++){
                 //logger.info("执行值"+highestExecuteInstanceCl);
                 //logger.info("i是"+i);
-                InstanceStateCL instanceCLtemp=globalinstances.get(i);
-                //try {
-                //    instanceCLtemp=olderInstanceClQueue.take();
-                //} catch (InterruptedException e) {
-                //    throw new RuntimeException(e);
-                //}
+               
+                InstanceStateCL instanceCLtemp;
+                try {
+                    instanceCLtemp=olderInstanceClQueue.take();
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+                // InstanceStateCL instanceCLtemp=globalinstances.get(i);
                 //logger.info("从全局队列中的值"+instanceCLtemp.iN);
                 //InstanceStateCL instanceCLtemp=globalinstances.get(i);
                 // 要进行复制机状态的改变，必须获得锁，因为改变状态操作和加入节点申请状态冲突，所以加锁
@@ -1796,7 +1815,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             
             //setupInitialState(msg.membership, msg.iN);
             setupJoinInitialState(msg.membership,msg.iN);
-            // TODO: 2023/5/29 对局部日志的初始化，和参数的配置
+            // TODO: 2023/5/29 对局部日志的初始化，和参数的配置，
             setNewInstanceLeader(msg.iN, msg.sN);
             if (receivedState != null) {//第F+1节点传递过来StateTransferMsg消息
                 assert receivedState.getKey().equals(msg.iN);
@@ -2019,7 +2038,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     
     // 两个地方使用,一个是和别的节点断开连接 一个是刚当选新Leader，对集群中不能连接的节点删除
     /**
-     *接收处理成员改变Msg：在Leader断开某个节点启动
+     *接收处理成员改变Msg：在Leader节点断开某个节点之间的连接启动
      */
     private void uponMembershipOpRequestMsg(MembershipOpRequestMsg msg, Host from, short sourceProto, int channel) {
         if (amQuorumLeader)//不改，成员管理还是由leader负责
@@ -2194,7 +2213,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                 deliverMessageIn(new MessageInEvent(new BabelMessage(msg, (short)-1, (short)-1), self, peerChannel));     
             }
             else{
-                sendMessage(msg, destination);// 发送至Control层  
+                sendMessage(msg, destination);// 发送至Control层 ，默认包含当前protoid 
             }
         }
     }
