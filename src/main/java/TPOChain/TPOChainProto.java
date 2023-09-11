@@ -1083,7 +1083,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      * 通知Data层leader宕机
      * */
     private void   triggerLeaderCrash(){
-        
+        // TODO: 2023/9/11  通知Leader宕机而不是网络断开链接
     }
 
     
@@ -1235,7 +1235,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     }
     
     
-    // 上面那三个方法是Leader节点使用，下面的是--------------
+    // 上面那三个方法是Leader节点使用，下面的是------------接收方-----
     private void uponAcceptCLMsg(AcceptCLMsg msg, Host from, short sourceProto, int channel) {
         //-------无效信息：对不在系统中的节点发送未定义消息让其重新加入系统
         if(!membership.contains(from)){
@@ -1244,14 +1244,32 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             return;
         }
         
+        // 标记是新建立还是老的，如果读挂载的话，可能新建立
+        boolean   instanceIsNewEstablish;
+        boolean   establishByMountRead;
         // 这里访问的同时，不能对globalinstances修改，不然会触发并发修改异常
         InstanceStateCL instance;
         if (!globalinstances.containsKey(msg.iN)) {
             instance=new InstanceStateCL(msg.iN);
             globalinstances.put(msg.iN, instance);
+            instanceIsNewEstablish=true;
+            establishByMountRead=false;
         }else {
             instance=globalinstances.get(msg.iN);
+            instanceIsNewEstablish=false;
+            // 因为新建的的接受号为null
+            if (instance.highestAccept==null){
+                establishByMountRead=true;
+            }else {
+                establishByMountRead=false;
+            }
         }
+
+        // 消息的term小于当前的term
+        if (msg.sN.lesserThan(currentSN.getValue())) {
+            logger.warn("Discarding accept since sN < hP: " + msg);
+            return;
+        } //隐含着之后新消息msg.SN大于等于现在的SN
         
         
         //"Discarding decided msg"  重复而且消息已经决定了
@@ -1260,55 +1278,54 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             return;
         }
         
-        // 消息的term小于当前的term
-        if (msg.sN.lesserThan(currentSN.getValue())) {
-            logger.warn("Discarding accept since sN < hP: " + msg);
-            return;
-        } //隐含着之后新消息msg.SN大于等于现在的SN
-
-        
         //是对重复消息的处理：这里对投票数少的消息丢弃，考虑宕机重发的情况-————就是断掉节点前继会重发所有ack以上的消息
         // 什么时候触发：当term不变，非leader故障，要重发一些消息，那已经接收到消息因为count小被丢弃；没有接收到的就接收
-        if (msg.sN.equals(instance.highestAccept) && (msg.nodeCounter <= instance.counter)) {
+        if ((msg.nodeCounter <= instance.counter) && msg.sN.equals(instance.highestAccept)) {
             logger.warn("Discarding since same sN & leader, while counter <=");
             return;
-        }
-        // 重发消息的话,term 会大于当前实例的
-
+        } // 重发消息的话,term 会大于当前实例的
+       
         
-        // TODO: 2023/6/26 因为leader选举成功会向所有节点发送选举成功消息，所以这个不需要了 
-        //设置msg.sN.getNode()为新支持的leader
+        //设置msg.sN.getNode()为新支持的leader因为leader选举成功会向所有节点发送选举成功消息，所以这个不需要了 
         if (msg.sN.greaterThan(currentSN.getValue())){
             setNewInstanceLeader(msg.iN, msg.sN);
         }
+        
         
         //在这里可能取消了删除节点，后续真的删除节点时也在后面的mark中重新加入节点
         //maybeCancelPendingRemoval(instance.acceptedValue);
         instance.accept(msg.sN, msg.value, (short) (msg.nodeCounter + 1));//进行对实例的投票确定
         
-        
         //更新highestAcceptedInstance信息
         if (highestAcceptedInstanceCl < instance.iN) {
             highestAcceptedInstanceCl=instance.iN;
         }
-
         
         if ((instance.acceptedValue.type == PaxosValue.Type.MEMBERSHIP) &&
                 (((MembershipOp) instance.acceptedValue).opType == MembershipOp.OpType.REMOVE))
             markForRemoval(instance);//对节点进行标记
         
+        if (msg.ack>highestAcknowledgedInstanceCl)//对于之前的实例进行ack并执行
+            ackInstanceCL(msg.ack);
+        
         forwardCL(instance);//转发下一个节点
         
         
-        // 为什么需要前者，因为新leader选举出来会重发一些消息，所以需要判断instance.isDecided()
-        if (!instance.isDecided() && instance.counter >= QUORUM_SIZE) //We have quorum!
-            decideAndExecuteCL(instance);//决定并执行实例
-
-        // 将实例放入待执行队列中
-        olderInstanceClQueue.add(instance);
         
-        if (msg.ack>highestAcknowledgedInstanceCl)
-             ackInstanceCL(msg.ack);//对于之前的实例进行ack并进行垃圾收集
+        // 新建立的可以放入，但误判到因为挂载读
+        if (instanceIsNewEstablish){
+            // 将实例放入待执行队列中，不是什么时候都放的，如果node等于0，
+            olderInstanceClQueue.add(instance);
+        }
+        // 因为挂载读，而创立的那加入队列，如果是重发或修改的，那不能重新加入队列
+        if (!instanceIsNewEstablish && establishByMountRead){
+            olderInstanceClQueue.add(instance);
+        }
+        
+        
+        // 为什么需要前者，因为新leader选举出来会重发一些消息，所以需要判断instance.isDecided()
+        if (instance.counter >= QUORUM_SIZE && !instance.isDecided()) //We have quorum!
+            decideAndExecuteCL(instance);//决定并执行实例
         
         //接收了此次消息 进行更新领导操作时间
         lastLeaderOp = System.currentTimeMillis();
@@ -1324,19 +1341,10 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         MembershipOp op = (MembershipOp) inst.acceptedValue;
         //这里封装了实现细节：实际改变了物理链：那么需要重新调整 逻辑控制链和数据通道链；Leader宕机是不会走这个流程，那么只有两种情况
         membership.addToPendingRemoval(op.affectedHost);// 改变了物理链
-
-        // TODO: 2023/9/10  改变逻辑控制链 
-        changeLogicChain();
-        // TODO: 2023/8/23  没有重新赋值nextok节点吗 
-        // FIXME: 2023/8/25  重发一些，ack+1到accept的消息
-        //members.
-        //nextOK;
         
-        //通知应该改变Front层，
-        triggerMembershipChangeNotification();
-        // TODO: 2023/8/3 因为后链节点的Front挂载在对应前链节点，当
-        //通知改变Data层，这个是更新FrontChain和BackChain，之后通知Data层
+        changeLogicChain();  // 改变逻辑控制链 
         changeDataFrontAndBackChain();
+        triggerMembershipChangeNotification();
     }
     
     
@@ -1345,7 +1353,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      * */
     // 链只是传导排序信息，最后ack发给Leader，是新Leader还是
     private void forwardCL(InstanceStateCL inst) {
-        // 转发消息应该循环完整条链  
+        // 转发消息应该循环完整条链  在这里head和supportleader是一致的
         if (nextOk.equals(head)){//使用逻辑链，表明已经传输到链尾
             // 发送ack前判断是否满足大多数的含义
             if (inst.counter < QUORUM_SIZE) {
@@ -1354,7 +1362,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                 throw new AssertionError("Last living in chain cannot decide. " +
                         "Are f+1 nodes dead/inRemoval? " + inst.counter);
             }
-            sendMessage(new AcceptAckCLMsg(inst.iN), supportedLeader());
+            //sendMessage(new AcceptAckCLMsg(inst.iN), supportedLeader());
+            sendMessage(new AcceptAckCLMsg(inst.iN), head);
         }else {//发送accept信息
             AcceptCLMsg msg = new AcceptCLMsg(inst.iN, inst.highestAccept, inst.counter, inst.acceptedValue,
                     highestAcknowledgedInstanceCl);
@@ -1383,10 +1392,13 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             //nothing  什么也不需要做
         }
         instance.markDecided();
-        //highestDecidedInstanceCl++;// 改成直接赋值
-        highestDecidedInstanceCl=instance.iN;
-        //放入旧的decide值，供执行单位使用
-        olddecidequeue.add(highestDecidedInstanceCl);
+        
+        //highestDecidedInstanceCl++;
+        if (instance.iN>highestDecidedInstanceCl){
+            highestDecidedInstanceCl=instance.iN;
+            //放入旧的decide值，供执行单位使用
+            olddecidequeue.add(highestDecidedInstanceCl);
+        }
     }
 
     
@@ -1399,41 +1411,34 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         if (o.opType == MembershipOp.OpType.REMOVE) {
             logger.info("Removed from membership: " + target + " in inst " + instance.iN);
             membership.removeMember(target);
-            triggerMembershipChangeNotification();
-            triggerFrontChainChange();
+            // 因为下述三个条件子啊标记删除已经操作了
+            //triggerMembershipChangeNotification();
+            //triggerFrontChainChange();
+            //changeLogicChain();
+            
             closeConnection(target);
         } else if (o.opType == MembershipOp.OpType.ADD) {
             logger.info("Added to membership: " + target + " in inst " + instance.iN);
             membership.addMember(target);
+            openConnection(target);
             triggerMembershipChangeNotification();
-            triggerFrontChainChange();
-            //对next  重新赋值
-            //nextOkFront=membership.nextLivingInFrontedChain(self);
-            //nextOkBack=membership.nextLivingInBackChain(self);
-            // TODO: 2023/8/3 对nextOk重新赋值
-            
-            openConnection(target);//
-
+            changeDataFrontAndBackChain();
+            changeLogicChain();//对nextok节点的重新赋值已经包含在这个函数中
             if (!hostConfigureMap.containsKey(target)){
-                //添加成功后，需要添加一新加节点的局部日志表 和  局部配置表
                 RuntimeConfigure runtimeConfigure=new RuntimeConfigure();
                 hostConfigureMap.put(target.getAddress(),runtimeConfigure);
             }
-
             if (!instances.containsKey(target)){
-                //局部日志进行初始化 
-                //Map<Host,Map<Integer, InstanceState>> instances 
                 ConcurrentMap<Integer, InstanceState>  ins=new ConcurrentHashMap<>(50000);
                 instances.put(target.getAddress(),ins);
             }
-            
             if (state == TPOChainProto.State.ACTIVE) {
                 //运行到这个方法说明已经满足大多数了
                 sendMessage(new JoinSuccessMsg(instance.iN, instance.highestAccept, membership.shallowCopy()), target);
-                //assert highestDecidedInstanceCl == instance.iN;
-                //TODO need mechanism for joining node to inform nodes they can forget stored state
+                // need mechanism for joining node to inform nodes they can forget stored state
                 pendingSnapshots.put(target, MutablePair.of(instance.iN, instance.counter == QUORUM_SIZE));
                 sendRequest(new GetSnapshotRequest(target, instance.iN), TPOChainFront.PROTOCOL_ID_BASE);
+                // TODO: 2023/9/11 这里应该停止执行Execute线程的运行，待取得完状态之后重新开启执行线程 
             }
         }
     }
@@ -1442,7 +1447,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     
     //Notice  读应该是在附加的日志项被执行前执行，而不是之后或ack时执行
     /**
-     * 对于ack包括以前的消息执行
+     * 对于ack包括以前的消息执行;是累加确认
      * */
     private void ackInstanceCL(int instanceN) {
         //处理重复消息或过时
@@ -1454,13 +1459,12 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //For nodes in the first half of the chain only
         for (int i = highestDecidedInstanceCl + 1; i <= instanceN; i++) {
             InstanceStateCL ins = globalinstances.get(i);
-            //assert !ins.isDecided();
-            decideAndExecuteCL(ins);
-            //assert highestDecidedInstanceCl == i;
+            // 如果没有执行的话，
+            if (!ins.isDecided()){
+                decideAndExecuteCL(ins);
+            }
         }
-        
-        // 进行ack信息的更新，使用++ 还是直接赋值好 ,使用直接赋值更好
-        //highestAcknowledgedInstanceCl++;
+        //因为这个函数的调用处都判断了instanceN和ack的大小，这里不再需要判断了
         highestAcknowledgedInstanceCl=instanceN;
         if (highestAcknowledgedInstanceCl % 200 == 0) {
             olddackqueue.add(highestAcknowledgedInstanceCl);
@@ -1476,24 +1480,26 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //    logger.debug("接收"+from+"的"+msg);
         //}
         
+        /**
+         * 对小于当前ack丢弃
+         * */
         if (msg.instanceNumber <= highestAcknowledgedInstanceCl) {
             logger.warn("Ignoring  acceptAckCL of Control  layer for old instance: " + msg);
             return;
         }
-
-        // TODO: 2023/9/11  这里有问题 
-        //TODO never happens?  因为可能链尾节点向新的Leader发送以往的旧消息的确认，新Leader会重发，所以应该丢弃
-        InstanceStateCL inst = globalinstances.get(msg.instanceNumber);
-        if (!amQuorumLeader || !inst.highestAccept.getNode().equals(self)) {
-            logger.error("Received Ack without being leader...");
-            throw new AssertionError("Received Ack without being leader...");
-        }
         
-        //这里下面两行调了顺序
-        if (msg.instanceNumber>highestAcknowledgedInstanceCl)
-            ackInstanceCL(msg.instanceNumber);
+        //TODO: 2023/9/11   never happens? 这里有问题  因为可能链尾节点向新的Leader发送以往的旧消息的确认，新Leader会重发，所以应该丢弃
+        //InstanceStateCL inst = globalinstances.get(msg.instanceNumber);
+        //if (!amQuorumLeader || !inst.highestAccept.getNode().equals(self)) {
+        //    logger.error("Received AckCL without being leader...");
+        //    throw new AssertionError("Received Ack without being leader...");
+        //}
         
-        // FIXME: 2023/6/15 取消下面这个一直发送的noop消息，在低负载情况下开启
+        //这是对之前的消息累加确认
+        
+        ackInstanceCL(msg.instanceNumber);
+        
+        // 取消下面这个一直发送的noop消息，在低负载情况下开启，因为会占用正常消息的处理
         //if (inst.acceptedValue.type != PaxosValue.Type.NO_OP)
         //    lastAcceptTimeCl = 0; //Force sending a NO-OP (with the ack)
     }
@@ -1547,11 +1553,12 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                 if (instanceCLtemp==null || instanceCLtemp.iN!=i){
                     instanceCLtemp=globalinstances.get(i);              
                 }
+                // 如果还为空跳出循环
                 if (instanceCLtemp==null){
+                    logger.warn("instanceCLtemp still is  null ！！！");
                     break;
+                    //logger.info("从全局队列中的值"+instanceCLtemp.iN);
                 }
-                //logger.info("从全局队列中的值"+instanceCLtemp.iN);
-                
                 // 要进行复制机状态的改变，必须获得锁，因为改变状态操作和加入节点申请状态冲突，所以加锁
                 // 当获取状态时改为停止执行线程，不需要加锁
                 if (instanceCLtemp.acceptedValue.type!= PaxosValue.Type.SORT){
@@ -1634,6 +1641,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             if (!Thread.currentThread().isInterrupted()){
                 break; //退出循环
             }
+            
             try { 
                 Integer newreceiveack=olddackqueue.poll(3000, java.util.concurrent.TimeUnit.MILLISECONDS);
                 if (newreceiveack==null){

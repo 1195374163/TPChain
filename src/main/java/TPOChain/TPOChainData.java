@@ -152,10 +152,13 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
      * 标记是否为前段节点，是的话可以分发消息，并向leader发送排序
      */
     private boolean amFrontedNode;
+    
+    // 与其他节点建立连接的节点
+    private final Set<Host> establishedConnections = new HashSet<>();
 
 
-    
-    
+
+
     // TODO: 2023/7/28  GC回收通道使用者的旧日志    那历来使用者的日志呢  
     // gc线程 ：
     private  Thread gcThread;
@@ -806,8 +809,6 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
 
 
 
-    // 与其他节点建立连接的节点
-    public  final Set<Host> establishedConnections = new HashSet<>();
     
 
     /**------------------------------接收来自控制层的成员管理消息 ---------**/
@@ -829,6 +830,8 @@ public class TPOChainData extends GenericProtocol  implements ShareDistrubutedIn
     
     //在前链节点和后链节点有改动时调用，初始操作时也视为成员发生改动
     protected  void onFrontChainNotification(FrontChainNotification notification,short emitterID){
+        // TODO: 2023/9/11  在建立连接中如果此种没有某个节点，那么关闭和它的连接，如果没有某个节点，开启与它的连接 
+        
         //logger.info("接收来的通知是"+notification.getFrontChain()+notification.getBackchain());
         frontChain=notification.getFrontChain();
         
