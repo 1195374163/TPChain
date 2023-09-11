@@ -1,6 +1,5 @@
 package frontend;
 
-import TPOChain.messages.JoinRequestMsg;
 import app.Application;
 import pt.unl.fct.di.novasys.babel.core.GenericProtocol;
 import pt.unl.fct.di.novasys.babel.exceptions.HandlerRegistrationException;
@@ -22,32 +21,34 @@ import java.util.List;
 import java.util.Properties;
 
 public abstract class FrontendProto extends GenericProtocol {
-
+    
+    
     public static final String ADDRESS_KEY = "frontend_address";
     public static final String PEER_PORT_KEY = "frontend_peer_port";
     
     private static final Logger logger = LogManager.getLogger(FrontendProto.class);
 
-    // 操作的两种枚举
-    public enum OpType {STRONG_READ, WRITE}
     
-    // 使用的端口号：
-    protected final int PEER_PORT;
     // 标识自身
     protected final InetAddress self;
+    // 使用的端口号：
+    protected final int PEER_PORT;
+    
+    //第几个Front索引，一般为0
+    private final short protoIndex;
+
     // 对状态层的标识，对状态的操作调用这个
     protected final Application app;
-    
-    
+
+    // 操作的两种枚举
+    public enum OpType {STRONG_READ, WRITE}
     
     //下面两个参数拼接生成对操作的唯一标识
     private final int opPrefix;
     private int opCounter;
+
     
     
-    
-    //第几个Front索引
-    private final short protoIndex;
     // TCP通道
     protected int peerChannel;
     
@@ -71,7 +72,7 @@ public abstract class FrontendProto extends GenericProtocol {
         
         this.app = app;
         membership = null;
-        this.protoIndex = protoIndex;// 不使用
+        this.protoIndex = protoIndex;// 一般为0
     }
 
     
@@ -86,8 +87,9 @@ public abstract class FrontendProto extends GenericProtocol {
         peerChannel = createChannel(TCPChannel.NAME, peerProps);
 
         
+        
         registerMessageSerializer(peerChannel, PeerBatchMessage.MSG_CODE, PeerBatchMessage.serializer);
-
+        
         // 转发batch到挂载节点之后的设置发送成功之后消息处理
         registerMessageHandler(peerChannel, PeerBatchMessage.MSG_CODE, this::onPeerBatchMessage,this::uponPeerBatchMessageOut ,this::uponMessageFailed);
        
@@ -100,17 +102,19 @@ public abstract class FrontendProto extends GenericProtocol {
         registerChannelEventHandler(peerChannel, OutConnectionUp.EVENT_ID, this::onOutConnectionUp);
         registerChannelEventHandler(peerChannel, OutConnectionFailed.EVENT_ID, this::onOutConnectionFailed);
 
+        
+        
         //Consensus------成员更改和 写请求
         subscribeNotification(MembershipChange.NOTIFICATION_ID, this::onMembershipChange);
         subscribeNotification(ExecuteBatchNotification.NOTIFICATION_ID, this::onExecuteBatch);
         
-        //----------------新加入节点使用
-        subscribeNotification(InstallSnapshotNotification.NOTIFICATION_ID, this::onInstallSnapshot);
         
-        //接收来自proto的请求state的请求----
+        
+        //----------------新加入节点使用-------------------
+        subscribeNotification(InstallSnapshotNotification.NOTIFICATION_ID, this::onInstallSnapshot);
+        //接收来自proto的请求state,----
         registerRequestHandler(GetSnapshotRequest.REQUEST_ID, this::onGetStateSnapshot);
-       
-       
+        
         _init(props);
     }
 
@@ -121,7 +125,7 @@ public abstract class FrontendProto extends GenericProtocol {
 
     
     /**
-     * 生成独一无二的有关ip和本地数字的MessageID
+     * 作为批处理id：生成独一无二的有关ip和本地数字的MessageID
      * 返回结果是两串字拼接的成果： (opcount，IP地址)
      * */
     protected long nextId() {
@@ -131,8 +135,9 @@ public abstract class FrontendProto extends GenericProtocol {
     }
 
     
+    
    
-    /* ------------------------ APP INTERFACE ----------------------- */
+    // ------------------------ APP INTERFACE -----------------
    
     //TODO SYNCHRONIZE THIS FOR EVERY FRONTEND
     public abstract void submitOperation(byte[] op, OpType type);
@@ -142,14 +147,23 @@ public abstract class FrontendProto extends GenericProtocol {
     //----------------------- PEER EVENTS --------------
 
     /**
-     * 处理PeerBatch消息事件
+     * 处理接收PeerBatch消息事件
      * */
     protected abstract void onPeerBatchMessage(PeerBatchMessage msg, Host from, short sProto, int channel);
-
+    
+    /**
+     * 处理发送成功PeerBatch消息事件
+     * */
     protected void uponPeerBatchMessageOut(PeerBatchMessage msg, Host from, short sProto, int channel) {
         
     }
     
+    /**
+     * 处理发送失败PeerBatch消息事件
+     * */
+    public void uponMessageFailed(ProtoMessage msg, Host host, short i, Throwable throwable, int i1) {
+        logger.warn("Failed: " + msg + ", to: " + host + ", reason: " + throwable.getMessage());
+    }
     
     protected abstract void onOutConnectionUp(OutConnectionUp event, int channel);
 
@@ -165,18 +179,20 @@ public abstract class FrontendProto extends GenericProtocol {
         logger.debug(event);
     }
 
-    
-    //protected  abstract void uponMessageFailed(ProtoMessage msg, Host host, short i, Throwable throwable, int i1);
-    public void uponMessageFailed(ProtoMessage msg, Host host, short i, Throwable throwable, int i1) {
-        logger.warn("Failed: " + msg + ", to: " + host + ", reason: " + throwable.getMessage());
-    }
-    
-    
 
-  
+
+
+    // -----------------接收Control层控制指令------------------
+    protected abstract void onExecuteBatch(ExecuteBatchNotification reply, short from);
+
+
+    protected abstract void onMembershipChange(MembershipChange notification, short emitterId);
     
     
-    /* ------------------------------------------- CONSENSUS OPS ------------------------------------------- */
+    
+    
+    
+    //----------------- 接收Control层的获取和安装状态 -------------
     
     /**
      * 由proto请求，fronted接收，然后答复发送到相应的协议Proto得到的快照
@@ -193,11 +209,4 @@ public abstract class FrontendProto extends GenericProtocol {
     private void onInstallSnapshot(InstallSnapshotNotification not, short from) {
         app.installState(not.getState());
     }
-    
-    
-    // -----------------接收Control层控制指令
-    protected abstract void onExecuteBatch(ExecuteBatchNotification reply, short from);
-
-    
-    protected abstract void onMembershipChange(MembershipChange notification, short emitterId);
 }
