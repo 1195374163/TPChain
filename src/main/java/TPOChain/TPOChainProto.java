@@ -239,10 +239,11 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     //给我这个节点发送 joinSuccess消息的节点  List of JoinSuccess (nodes who generated snapshots for me)
     private final Queue<Host> hostsWithSnapshot = new LinkedList<>();
     
-    //这个需要 这里存储的是全局要处理的信息
+
     /**
      *暂存节点处于joining，暂存从前驱节点过来的批处理信息，等待状态变为active，再进行处理
      */
+    // 暂存新加入节点因为状态没有迁移完成不能执行的实例，
     private final Queue<SortValue> bufferedOps = new LinkedList<>();
     
     // TODO: 2023/7/21 加入的状态应该包含它这个状态执行到全局序列哪的序号，后续根据这个指标进行执行
@@ -1322,9 +1323,9 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         // 分情况讨论： 后链节点   前链节点非Leader    Leader节点(不会，Leader不会发出自己删除自己的命令)    
         MembershipOp op = (MembershipOp) inst.acceptedValue;
         //这里封装了实现细节：实际改变了物理链：那么需要重新调整 逻辑控制链和数据通道链；Leader宕机是不会走这个流程，那么只有两种情况
-        membership.addToPendingRemoval(op.affectedHost);
+        membership.addToPendingRemoval(op.affectedHost);// 改变了物理链
 
-        // TODO: 2023/9/10  改变逻辑链 
+        // TODO: 2023/9/10  改变逻辑控制链 
         changeLogicChain();
         // TODO: 2023/8/23  没有重新赋值nextok节点吗 
         // FIXME: 2023/8/25  重发一些，ack+1到accept的消息
@@ -1362,6 +1363,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     }
     
     
+    
     /**
      * decide并执行Execute实例
      * */
@@ -1370,14 +1372,15 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         //    logger.debug("Decided: " + instance.iN + " - " + instance.acceptedValue);
         if (instance.acceptedValue.type == PaxosValue.Type.SORT) {
             if (state == TPOChainProto.State.ACTIVE){
-                // 不做执行 依靠执行线程执行
-            } else  //在节点处于加入join之后，暂存存放的批处理命令
+                // 不做执行 因为依靠执行线程执行
+            } else { //在节点处于加入join之后，暂存存放的批处理命令
                 // TODO: 2023/6/1 这里不对，在加入节点时，不能执行这个 
                 bufferedOps.add((SortValue) instance.acceptedValue);
+            }
         } else if (instance.acceptedValue.type == PaxosValue.Type.MEMBERSHIP) {
             executeMembershipOp(instance);
         } else if (instance.acceptedValue.type == PaxosValue.Type.NO_OP) {
-            //nothing  
+            //nothing  什么也不需要做
         }
         instance.markDecided();
         //highestDecidedInstanceCl++;// 改成直接赋值
@@ -1409,7 +1412,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             //nextOkBack=membership.nextLivingInBackChain(self);
             // TODO: 2023/8/3 对nextOk重新赋值
             
-            
             openConnection(target);//
 
             if (!hostConfigureMap.containsKey(target)){
@@ -1425,7 +1427,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                 instances.put(target.getAddress(),ins);
             }
             
-            
             if (state == TPOChainProto.State.ACTIVE) {
                 //运行到这个方法说明已经满足大多数了
                 sendMessage(new JoinSuccessMsg(instance.iN, instance.highestAccept, membership.shallowCopy()), target);
@@ -1437,6 +1438,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         }
     }
 
+    
     
     //Notice  读应该是在附加的日志项被执行前执行，而不是之后或ack时执行
     /**
@@ -1478,8 +1480,9 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             logger.warn("Ignoring  acceptAckCL of Control  layer for old instance: " + msg);
             return;
         }
-        
-        //TODO never happens?
+
+        // TODO: 2023/9/11  这里有问题 
+        //TODO never happens?  因为可能链尾节点向新的Leader发送以往的旧消息的确认，新Leader会重发，所以应该丢弃
         InstanceStateCL inst = globalinstances.get(msg.instanceNumber);
         if (!amQuorumLeader || !inst.highestAccept.getNode().equals(self)) {
             logger.error("Received Ack without being leader...");
@@ -1497,7 +1500,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
 
     
     
-    
     // TODO: 2023/8/4 如果消息队列中没有，再从日志中获取日志
     //TODO 一个命令可以回复客户端，只有在它以及它之前所有实例被ack时，才能回复客户端
     // 这是分布式系统的要求，因为原程序已经隐含了这个条件，通过判断出队列结构，FIFO，保证一个batch执行了，那么
@@ -1509,10 +1511,19 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
     // 从execute到ack的开始执行
     private void execLoop(){
         while(true){
-            //先得到旧值
-            int olddecide;
+            //是否接受到中断信号，终止执行 
+            if (!Thread.currentThread().isInterrupted()){
+                break; //退出循环
+            }
+            int olddecide; //先得到旧值
             try {
-                olddecide=this.olddecidequeue.take();
+                //olddecide=this.olddecidequeue.take();
+                Integer newolddecide=this.olddecidequeue.poll(3000, java.util.concurrent.TimeUnit.MILLISECONDS);
+                if (newolddecide==null){
+                    continue;
+                }
+                // 不为空，赋值
+                olddecide=newolddecide;
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
             }
@@ -1520,30 +1531,42 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             for (int i=highestExecuteInstanceCl+1;i<=olddecide;i++){
                 //logger.info("执行值"+highestExecuteInstanceCl);
                 //logger.info("i是"+i);
-               
                 InstanceStateCL instanceCLtemp;
                 try {
-                    instanceCLtemp=olderInstanceClQueue.take();
+                    //instanceCLtemp=olderInstanceClQueue.take();
+                    InstanceStateCL newinstanceCLtemp=olderInstanceClQueue.poll(3000, java.util.concurrent.TimeUnit.MILLISECONDS);
+                    if (newinstanceCLtemp!=null){
+                        instanceCLtemp=newinstanceCLtemp;
+                    }else {
+                        instanceCLtemp=null;
+                    }
                 } catch (InterruptedException e) {
                     throw new RuntimeException(e);
                 }
-                // InstanceStateCL instanceCLtemp=globalinstances.get(i);
+                // TODO: 2023/9/11 验证从队列取出来的值是否对应的,不符合直接从日志取值
+                if (instanceCLtemp==null || instanceCLtemp.iN!=i){
+                    instanceCLtemp=globalinstances.get(i);              
+                }
+                if (instanceCLtemp==null){
+                    break;
+                }
                 //logger.info("从全局队列中的值"+instanceCLtemp.iN);
-                //InstanceStateCL instanceCLtemp=globalinstances.get(i);
+                
                 // 要进行复制机状态的改变，必须获得锁，因为改变状态操作和加入节点申请状态冲突，所以加锁
+                // 当获取状态时改为停止执行线程，不需要加锁
                 if (instanceCLtemp.acceptedValue.type!= PaxosValue.Type.SORT){
                     // 那消息可能是成员管理消息  也可能是noop消息
-                    highestExecuteInstanceCl++;
+                    highestExecuteInstanceCl=i;
                     if (highestExecuteInstanceCl % 1000 == 0) {
                         olddexecutequeue.add(highestExecuteInstanceCl);
+                    }
+                    if (logger.isDebugEnabled()){
+                        logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+instanceCLtemp.acceptedValue);
                     }
                     //触发读
                     InstanceStateCL finalGlobalInstanceTemp = instanceCLtemp;
                     if(!instanceCLtemp.getAttachedReads().isEmpty()){
                         instanceCLtemp.getAttachedReads().forEach((k, v) -> sendReply(new ExecuteReadReply(v, finalGlobalInstanceTemp.iN), k));
-                    }
-                    if (logger.isDebugEnabled()){
-                        logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+instanceCLtemp.acceptedValue);
                     }
                 }else {// 是排序消息
                     SortValue sortTarget= (SortValue)instanceCLtemp.acceptedValue;
@@ -1553,13 +1576,23 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                         InetAddress tempInetAddress=tempItem.getNode().getAddress();
                         // 得到是局部日志的哪个实例项
                         int  iNtarget=tempItem.getiN();
+                        
+                        
                         // 是命令的实体
                         InstanceState  intancetmp= null;
                         try {
-                            intancetmp = hostMessageQueue.get(tempInetAddress).take();
+                            //intancetmp = hostMessageQueue.get(tempInetAddress).take();
+                            InstanceState  newintancetmp= hostMessageQueue.get(tempInetAddress).poll(3000, java.util.concurrent.TimeUnit.MILLISECONDS);
+                            if (newintancetmp==null){
+                                // 直接从日志获取日志项，而不是消息队列中
+                                intancetmp=instances.get(tempInetAddress).get(i);
+                            }else {
+                                intancetmp=newintancetmp;
+                            }
                         } catch (InterruptedException e) {
                             throw new RuntimeException(e);
                         }
+                        // 验证是否是指定的实例
                         if (intancetmp.iN==iNtarget){
                             triggerNotification(new ExecuteBatchNotification(((AppOpBatch) intancetmp.acceptedValue).getBatch()));
                             hostConfigureMap.get(tempInetAddress).highestExecutedInstance=iNtarget;
@@ -1570,7 +1603,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                             throw new AssertionError("消息队列出错，执行的不是所期望的 ");
                         }
                     }
-                    highestExecuteInstanceCl++;
+                    highestExecuteInstanceCl=i;
                     if (highestExecuteInstanceCl % 1000 == 0) {
                         olddexecutequeue.add(highestExecuteInstanceCl);
                     }
@@ -1587,6 +1620,64 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
         }
     }
     
+    
+    /**
+     * 回收线程,回收全局日志
+     */
+    private void gcLoop(){
+        // 以ack为基准，execute<=ack,回收gc+1->execute的日志，因为gc只参照这两个指标
+        int olderexecute;
+        int olderack;
+        // 因为必将只有这两个提供旧值的队列，不需要转换
+        while(true){
+            //是否接受到中断信号，终止执行 
+            if (!Thread.currentThread().isInterrupted()){
+                break; //退出循环
+            }
+            try { 
+                Integer newreceiveack=olddackqueue.poll(3000, java.util.concurrent.TimeUnit.MILLISECONDS);
+                if (newreceiveack==null){
+                    continue;
+                }
+                // 不为空，赋值
+                olderack=newreceiveack;
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+            int loopTimers=0;
+            while(true){// 确保execute队列不为空
+                Integer newreceiveexecute=olddexecutequeue.peek();
+                if (newreceiveexecute!=null){
+                    olderexecute=newreceiveexecute;
+                    if (olderexecute<=olderack){
+                        for (int i=highestGarbageCollectionCl+1;i<=olderexecute;i++){
+                            globalinstances.remove(i);//删除全局实例
+                            highestGarbageCollectionCl=i;
+                        }
+                        olddexecutequeue.poll();// 移除旧execute值
+                    }else{
+                        break;//因为execute已经超过ack，退出execute的循环，重新选择新ack
+                    }
+                    loopTimers=0;
+                }else {
+                    // 如果队列为空，暂停3s 之后重试
+                    try {
+                        Thread.sleep(3000);
+                    } catch (InterruptedException e) {
+                        throw new RuntimeException(e);
+                    }
+                    loopTimers++;
+                    // 多次得不到execute的值，重新选择ack的值
+                    if (loopTimers>=3){
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    
+    
+    //-------------------------备份--------------------------------
     /**
      * 备份，使用消息队列的执行线程
      * */
@@ -1667,17 +1758,19 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             }
         }
     }
-
+    
     /**
-     * 回收线程,回收全局日志的
-     */
-    private void gcLoop(){
+     * 备份，使用消息队列的回收线程
+     * */
+    private  void gcLoopBack(){
+        // 以ack为基准，execute<=ack,回收gc+1->execute的日志
         int olderexecute;
         int olderack;
         while(true){
             while(true){
                 try {
                     olderexecute=olddexecutequeue.take();
+
                 } catch (InterruptedException e) {
                     throw new RuntimeException(e);
                 }
@@ -1702,8 +1795,7 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             }
         }
     }
-
-
+    
     
     
     
