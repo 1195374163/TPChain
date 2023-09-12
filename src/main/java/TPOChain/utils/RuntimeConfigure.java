@@ -74,7 +74,7 @@ public class RuntimeConfigure {
     
 
     
-    // 上一次发送accept消息的时间
+    //-------废弃------------上一次发送accept消息的时间
     public long  lastSendAcceptTime=0;
     
     //  节点在接收到这个节点的分发消息的时间

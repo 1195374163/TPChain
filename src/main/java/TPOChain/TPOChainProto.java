@@ -1247,6 +1247,10 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             return;
         }
         
+        if (logger.isDebugEnabled()){
+            logger.debug("接收"+from+"的"+msg);
+        }
+        
         // 标记是新建立还是老的，如果读挂载的话，可能新建立
         boolean   instanceIsNewEstablish;
         boolean   establishByMountRead;
@@ -1395,7 +1399,6 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             //nothing  什么也不需要做
         }
         instance.markDecided();
-        
         //highestDecidedInstanceCl++;
         if (instance.iN>highestDecidedInstanceCl){
             highestDecidedInstanceCl=instance.iN;
@@ -1479,9 +1482,9 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
      * leader接收ack信息，对实例进行ack
      * */
     private void uponAcceptAckCLMsg(AcceptAckCLMsg msg, Host from, short sourceProto, int channel) {
-        //if (logger.isDebugEnabled()){
-        //    logger.debug("接收"+from+"的"+msg);
-        //}
+        if (logger.isDebugEnabled()){
+            logger.debug("接收"+from+"的"+msg);
+        }
         
         /**
          * 对小于当前ack丢弃
@@ -1509,15 +1512,15 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
 
     
     
-    // TODO: 2023/8/4 如果消息队列中没有，再从日志中获取日志
-    //TODO 一个命令可以回复客户端，只有在它以及它之前所有实例被ack时，才能回复客户端
+    //如果消息队列中没有，再从日志中获取日志
+    //T一个命令可以回复客户端，只有在它以及它之前所有实例被ack时，才能回复客户端
     // 这是分布式系统的要求，因为原程序已经隐含了这个条件，通过判断出队列结构，FIFO，保证一个batch执行了，那么
     // 它之前的batch也执行了
-    //TODO 只有一个实例的排序消息和分发消息都到齐了，才能进行执行
+    //只有一个实例的排序消息和分发消息都到齐了，才能进行执行
     // 所以不是同步的，所以有时候可能稍后延迟，需要两者齐全
     // 所以每次分发消息或 排序消息达到执行要求后，都要对从
     // 全局日志的已经ack到当前decided之间的消息进行扫描，达到命令执行的要求
-    // 从execute到ack的开始执行
+    // 从execute到decide的开始执行
     private void execLoop(){
         while(true){
             //是否接受到中断信号，终止执行 
@@ -1527,19 +1530,22 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                     //olddecide=this.olddecidequeue.take();
                     Integer newolddecide=this.olddecidequeue.poll(3000, java.util.concurrent.TimeUnit.MILLISECONDS);
                     if (newolddecide==null){
+                        if (logger.isDebugEnabled()){
+                            logger.debug("因为没有old decide 所以continue");
+                        }
                         continue;
                     }
                     // 不为空，赋值
                     olddecide=newolddecide;
+                    if (logger.isDebugEnabled()){
+                        logger.debug("当前使用的decide号是"+olddecide);
+                    }
                 } catch (InterruptedException e) {
                     throw new RuntimeException(e);
                 }
-                //logger.info("旧decide"+olddecide);
                 for (int i=highestExecuteInstanceCl+1;i<=olddecide;i++){
-                    //logger.info("执行值"+highestExecuteInstanceCl);
                     InstanceStateCL instanceCLtemp;
                     try {
-                        //instanceCLtemp=olderInstanceClQueue.take();
                         InstanceStateCL newinstanceCLtemp=olderInstanceClQueue.poll(3000, java.util.concurrent.TimeUnit.MILLISECONDS);
                         if (newinstanceCLtemp!=null){
                             instanceCLtemp=newinstanceCLtemp;
@@ -1555,9 +1561,8 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                     }
                     // 如果还为空跳出循环
                     if (instanceCLtemp==null){
-                        logger.warn("instanceCLtemp still is  null ！！！");
+                        logger.warn("instanceCLtempCL still is  null ！！！");
                         break;
-                        //logger.info("从全局队列中的值"+instanceCLtemp.iN);
                     }
                     // 要进行复制机状态的改变，必须获得锁，因为改变状态操作和加入节点申请状态冲突，所以加锁
                     // 当获取状态时改为停止执行线程，不需要加锁
@@ -1577,14 +1582,18 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                         }
                     }else {// 是排序消息
                         SortValue sortTarget= (SortValue)instanceCLtemp.acceptedValue;
+                        if (logger.isDebugEnabled()){
+                            logger.debug("执行的排序消息批是"+sortTarget);  
+                        }
                         List<SortItem> batch=sortTarget.getSortItemsbatch();
                         for (SortItem tempItem:batch) {
                             // 得到是哪个局部日志
                             InetAddress tempInetAddress=tempItem.getNode().getAddress();
                             // 得到是局部日志的哪个实例项
                             int  iNtarget=tempItem.getiN();
-
-
+                            if (logger.isDebugEnabled()){
+                                logger.debug("应该待执行的排序消息是"+tempInetAddress+"的"+iNtarget);
+                            }
                             // 是命令的实体
                             InstanceState  intancetmp= null;
                             try {
@@ -1599,6 +1608,10 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                             } catch (InterruptedException e) {
                                 throw new RuntimeException(e);
                             }
+                            if (intancetmp==null){
+                                logger.info("intancetmp still be null:"+tempInetAddress+"的"+iNtarget+"为空");
+                                throw new AssertionError("消息队列为null ");
+                            }
                             // 验证是否是指定的实例
                             if (intancetmp.iN==iNtarget){
                                 triggerNotification(new ExecuteBatchNotification(((AppOpBatch) intancetmp.acceptedValue).getBatch()));
@@ -1607,15 +1620,13 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
                                     hostConfigureMap.get(tempInetAddress).executeFlagQueue.add(iNtarget);
                                 }
                             } else {
+                                logger.info("应该是"+tempInetAddress+"的"+iNtarget+";现在却是"+intancetmp.iN);
                                 throw new AssertionError("消息队列出错，执行的不是所期望的 ");
                             }
                         }
                         highestExecuteInstanceCl=i;
                         if (highestExecuteInstanceCl % 1000 == 0) {
                             olddexecutequeue.add(highestExecuteInstanceCl);
-                        }
-                        if (logger.isDebugEnabled()){
-                            logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+instanceCLtemp.acceptedValue);
                         }
                         //如果有读挂载，触发读
                         InstanceStateCL finalGlobalInstanceTemp = instanceCLtemp;
@@ -1686,7 +1697,123 @@ public class TPOChainProto extends GenericProtocol  implements ShareDistrubutedI
             }
         }
     }
+
     
+    //--------备份--------使用消息队列的执行线程
+    private void execLoopQueue(){
+        while(true){
+            //是否接受到中断信号，终止执行 
+            if (!Thread.currentThread().isInterrupted()){
+                int olddecide; //先得到旧值
+                try {
+                    //olddecide=this.olddecidequeue.take();
+                    Integer newolddecide=this.olddecidequeue.poll(3000, java.util.concurrent.TimeUnit.MILLISECONDS);
+                    if (newolddecide==null){
+                        continue;
+                    }
+                    // 不为空，赋值
+                    olddecide=newolddecide;
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+                //logger.info("旧decide"+olddecide);
+                for (int i=highestExecuteInstanceCl+1;i<=olddecide;i++){
+                    //logger.info("执行值"+highestExecuteInstanceCl);
+                    InstanceStateCL instanceCLtemp;
+                    try {
+                        //instanceCLtemp=olderInstanceClQueue.take();
+                        InstanceStateCL newinstanceCLtemp=olderInstanceClQueue.poll(3000, java.util.concurrent.TimeUnit.MILLISECONDS);
+                        if (newinstanceCLtemp!=null){
+                            instanceCLtemp=newinstanceCLtemp;
+                        }else {
+                            instanceCLtemp=null;
+                        }
+                    } catch (InterruptedException e) {
+                        throw new RuntimeException(e);
+                    }
+                    // TODO: 2023/9/11 验证从队列取出来的值是否对应的,不符合直接从日志取值
+                    if (instanceCLtemp==null || instanceCLtemp.iN!=i){
+                        instanceCLtemp=globalinstances.get(i);
+                    }
+                    // 如果还为空跳出循环
+                    if (instanceCLtemp==null){
+                        logger.warn("instanceCLtemp still is  null ！！！");
+                        break;
+                        //logger.info("从全局队列中的值"+instanceCLtemp.iN);
+                    }
+                    // 要进行复制机状态的改变，必须获得锁，因为改变状态操作和加入节点申请状态冲突，所以加锁
+                    // 当获取状态时改为停止执行线程，不需要加锁
+                    if (instanceCLtemp.acceptedValue.type!= PaxosValue.Type.SORT){
+                        // 那消息可能是成员管理消息  也可能是noop消息
+                        highestExecuteInstanceCl=i;
+                        if (highestExecuteInstanceCl % 1000 == 0) {
+                            olddexecutequeue.add(highestExecuteInstanceCl);
+                        }
+                        if (logger.isDebugEnabled()){
+                            logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+instanceCLtemp.acceptedValue);
+                        }
+                        //触发读
+                        InstanceStateCL finalGlobalInstanceTemp = instanceCLtemp;
+                        if(!instanceCLtemp.getAttachedReads().isEmpty()){
+                            instanceCLtemp.getAttachedReads().forEach((k, v) -> sendReply(new ExecuteReadReply(v, finalGlobalInstanceTemp.iN), k));
+                        }
+                    }else {// 是排序消息
+                        SortValue sortTarget= (SortValue)instanceCLtemp.acceptedValue;
+                        List<SortItem> batch=sortTarget.getSortItemsbatch();
+                        for (SortItem tempItem:batch) {
+                            // 得到是哪个局部日志
+                            InetAddress tempInetAddress=tempItem.getNode().getAddress();
+                            // 得到是局部日志的哪个实例项
+                            int  iNtarget=tempItem.getiN();
+
+                            // 是命令的实体
+                            InstanceState  intancetmp= null;
+                            try {
+                                //intancetmp = hostMessageQueue.get(tempInetAddress).take();
+                                InstanceState  newintancetmp= hostMessageQueue.get(tempInetAddress).poll(3000, java.util.concurrent.TimeUnit.MILLISECONDS);
+                                if (newintancetmp==null){
+                                    // 直接从日志获取日志项，而不是消息队列中
+                                    intancetmp=instances.get(tempInetAddress).get(i);
+                                }else {
+                                    intancetmp=newintancetmp;
+                                }
+                            } catch (InterruptedException e) {
+                                throw new RuntimeException(e);
+                            }
+                            if (intancetmp==null){
+                                logger.info("intancetmp still be null");
+                                throw new AssertionError("消息队列为null ");
+                            }
+                            // 验证是否是指定的实例
+                            if (intancetmp.iN==iNtarget){
+                                triggerNotification(new ExecuteBatchNotification(((AppOpBatch) intancetmp.acceptedValue).getBatch()));
+                                hostConfigureMap.get(tempInetAddress).highestExecutedInstance=iNtarget;
+                                if(iNtarget%1000==0){
+                                    hostConfigureMap.get(tempInetAddress).executeFlagQueue.add(iNtarget);
+                                }
+                            } else {
+                                throw new AssertionError("消息队列出错，执行的不是所期望的 ");
+                            }
+                        }
+                        highestExecuteInstanceCl=i;
+                        if (highestExecuteInstanceCl % 1000 == 0) {
+                            olddexecutequeue.add(highestExecuteInstanceCl);
+                        }
+                        if (logger.isDebugEnabled()){
+                            logger.debug("当前执行的序号为"+i+"; 当前全局实例为"+instanceCLtemp.acceptedValue);
+                        }
+                        //如果有读挂载，触发读
+                        InstanceStateCL finalGlobalInstanceTemp = instanceCLtemp;
+                        if(!instanceCLtemp.getAttachedReads().isEmpty()){
+                            instanceCLtemp.getAttachedReads().forEach((k, v) -> sendReply(new ExecuteReadReply(v, finalGlobalInstanceTemp.iN), k));
+                        }
+                    }
+                }
+            }else {
+                break;//退出循环
+            }
+        }
+    }
     
     //-------------------------备份--------------------------------
     /**
