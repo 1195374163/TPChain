@@ -1,11 +1,8 @@
-ChainPaxos
+TPChain
 ============
 
-## What is ChainPaxos?
-Implementation of the ChainPaxos consensus algorithm for high throughput replication.
+## What is TPChain?
 
-For details on the internals of the algorithm, refer to the USENIX ATC'22 paper 
-(to be published soon) that describes ChainPaxos in detail.
 
 ## Contents of the repository
 
